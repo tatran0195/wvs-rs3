@@ -119,7 +119,7 @@ impl LicenseProxyApi {
             name: &[u8],
         ) -> Result<libloading::Symbol<'static, T>, libloading::Error> {
             let s = lib.get::<T>(name)?;
-            Ok(mem::transmute(s))
+            Ok(unsafe { mem::transmute(s) })
         }
 
         unsafe {

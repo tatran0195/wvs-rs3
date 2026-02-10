@@ -1,91 +1,102 @@
-//! Channel registry — manages all channels and subscriptions.
+//! Channel registry — creates and manages all channels.
+
+use std::sync::Arc;
 
 use dashmap::DashMap;
+use tracing;
 
 use crate::connection::handle::ConnectionId;
 
 use super::channel::Channel;
-use super::subscription::SubscriptionTracker;
+use super::types::ChannelType;
 
-/// Registry of all active pub/sub channels.
+/// Registry of all active channels.
 #[derive(Debug)]
 pub struct ChannelRegistry {
-    /// Channel name → Channel.
-    channels: DashMap<String, Channel>,
-    /// Subscription tracker (reverse index).
-    subscriptions: SubscriptionTracker,
-    /// Default buffer size.
-    _buffer_size: usize,
+    /// Active channels by name
+    channels: DashMap<String, Arc<Channel>>,
+    /// Default buffer size for new channels
+    buffer_size: usize,
 }
 
 impl ChannelRegistry {
-    /// Creates a new channel registry.
+    /// Create a new channel registry
     pub fn new(buffer_size: usize) -> Self {
         Self {
             channels: DashMap::new(),
-            subscriptions: SubscriptionTracker::new(),
-            _buffer_size: buffer_size,
+            buffer_size,
         }
     }
 
-    /// Subscribes a connection to a channel.
-    pub fn subscribe(&self, channel_name: String, conn_id: ConnectionId) {
+    /// Get or create a channel
+    pub fn get_or_create(&self, channel_type: ChannelType) -> Arc<Channel> {
+        let name = channel_type.to_channel_name();
         self.channels
-            .entry(channel_name.clone())
-            .or_insert_with(|| Channel::new(channel_name.clone()))
-            .subscribe(conn_id);
-
-        self.subscriptions.add(conn_id, channel_name);
+            .entry(name.clone())
+            .or_insert_with(|| {
+                tracing::debug!("Channel created: {}", name);
+                Arc::new(Channel::new(channel_type))
+            })
+            .clone()
     }
 
-    /// Unsubscribes a connection from a channel.
-    pub fn unsubscribe(&self, channel_name: String, conn_id: ConnectionId) {
-        if let Some(mut channel) = self.channels.get_mut(&channel_name) {
-            channel.unsubscribe(conn_id);
-            if channel.is_empty() {
-                drop(channel);
-                self.channels.remove(&channel_name);
+    /// Get a channel by name (does not create)
+    pub fn get(&self, name: &str) -> Option<Arc<Channel>> {
+        self.channels.get(name).map(|r| Arc::clone(&r))
+    }
+
+    /// Subscribe a connection to a channel
+    pub fn subscribe(&self, channel_name: &str, connection_id: ConnectionId) -> bool {
+        let channel_type = match ChannelType::parse(channel_name) {
+            Some(ct) => ct,
+            None => {
+                tracing::warn!("Invalid channel name: {}", channel_name);
+                return false;
             }
-        }
-        self.subscriptions.remove(conn_id, &channel_name);
+        };
+
+        let channel = self.get_or_create(channel_type);
+        channel.subscribe(connection_id)
     }
 
-    /// Unsubscribes a connection from all channels.
-    pub fn unsubscribe_all(&self, conn_id: ConnectionId) {
-        let channels = self.subscriptions.remove_all(conn_id);
-        for channel_name in &channels {
-            if let Some(mut channel) = self.channels.get_mut(channel_name) {
-                channel.unsubscribe(conn_id);
-                if channel.is_empty() {
-                    drop(channel);
+    /// Unsubscribe a connection from a channel
+    pub fn unsubscribe(&self, channel_name: &str, connection_id: ConnectionId) -> bool {
+        if let Some(channel) = self.get(channel_name) {
+            let removed = channel.unsubscribe(connection_id);
+            // Clean up empty channels (except well-known ones)
+            if !channel.has_subscribers() {
+                let ct = &channel.channel_type;
+                if !ct.is_public() && !ct.requires_admin() {
                     self.channels.remove(channel_name);
+                    tracing::debug!("Channel removed (no subscribers): {}", channel_name);
                 }
             }
+            removed
+        } else {
+            false
         }
     }
 
-    /// Returns all subscriber connection IDs for a channel.
-    pub fn get_subscribers(&self, channel_name: &str) -> Vec<ConnectionId> {
-        self.channels
-            .get(channel_name)
-            .map(|ch| ch.get_subscribers())
+    /// Remove a connection from ALL channels
+    pub fn unsubscribe_all(&self, connection_id: ConnectionId) {
+        for entry in self.channels.iter() {
+            entry.value().unsubscribe(connection_id);
+        }
+    }
+
+    /// Get subscriber IDs for a channel
+    pub fn subscribers(&self, channel_name: &str) -> Vec<ConnectionId> {
+        self.get(channel_name)
+            .map(|ch| ch.subscriber_ids())
             .unwrap_or_default()
     }
 
-    /// Returns the subscription count for a connection.
-    pub fn subscription_count(&self, conn_id: ConnectionId) -> usize {
-        self.subscriptions.count(conn_id)
+    /// Get all channel names
+    pub fn channel_names(&self) -> Vec<String> {
+        self.channels.iter().map(|r| r.key().clone()).collect()
     }
 
-    /// Returns subscriber count for a channel.
-    pub fn channel_subscriber_count(&self, channel_name: &str) -> usize {
-        self.channels
-            .get(channel_name)
-            .map(|ch| ch.subscriber_count())
-            .unwrap_or(0)
-    }
-
-    /// Returns total number of active channels.
+    /// Get total channel count
     pub fn channel_count(&self) -> usize {
         self.channels.len()
     }

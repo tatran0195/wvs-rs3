@@ -1,114 +1,128 @@
-//! Central presence tracker — maintains online user state.
+//! Presence tracker — manages user online/offline/status state.
 
+use chrono::Utc;
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::activity::LastActivityTracker;
+use filehub_core::types::id::UserId;
+
+use super::activity::ActivityTracker;
 use super::status::PresenceStatus;
 
-/// Information about an online user's presence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserPresence {
-    /// User ID.
-    pub user_id: Uuid,
-    /// Username.
-    pub username: String,
-    /// Current presence status.
-    pub status: PresenceStatus,
-    /// When they came online.
-    pub online_since: chrono::DateTime<chrono::Utc>,
-}
+use crate::message::types::OutboundMessage;
 
-/// Tracks online users and their presence status.
+/// Tracks presence state for all users.
 #[derive(Debug)]
 pub struct PresenceTracker {
-    /// Online users.
-    online: DashMap<Uuid, UserPresence>,
-    /// Activity tracker.
-    activity: LastActivityTracker,
+    /// User ID → current status
+    statuses: DashMap<Uuid, PresenceStatus>,
+    /// User ID → username (cached)
+    usernames: DashMap<Uuid, String>,
+    /// Activity tracker
+    activity: ActivityTracker,
 }
 
 impl PresenceTracker {
-    /// Creates a new presence tracker.
+    /// Create a new presence tracker
     pub fn new() -> Self {
         Self {
-            online: DashMap::new(),
-            activity: LastActivityTracker::new(),
+            statuses: DashMap::new(),
+            usernames: DashMap::new(),
+            activity: ActivityTracker::new(),
         }
     }
 
-    /// Marks a user as online.
-    pub fn set_online(&self, user_id: Uuid, username: String) {
-        self.online.insert(
+    /// Mark a user as online
+    pub fn set_online(&self, user_id: Uuid, username: &str) -> OutboundMessage {
+        self.statuses.insert(user_id, PresenceStatus::Active);
+        self.usernames.insert(user_id, username.to_string());
+        self.activity.record(user_id);
+
+        OutboundMessage::UserOnline {
             user_id,
-            UserPresence {
-                user_id,
-                username,
-                status: PresenceStatus::Active,
-                online_since: chrono::Utc::now(),
-            },
-        );
-        self.activity.record_activity(user_id);
-    }
-
-    /// Marks a user as offline.
-    pub fn set_offline(&self, user_id: Uuid) {
-        self.online.remove(&user_id);
-        self.activity.remove(&user_id);
-    }
-
-    /// Updates a user's presence status.
-    pub fn update_status(&self, user_id: Uuid, status: String) {
-        if let Some(mut presence) = self.online.get_mut(&user_id) {
-            presence.status = PresenceStatus::from_str_or_default(&status);
+            username: username.to_string(),
+            timestamp: Utc::now(),
         }
-        self.activity.record_activity(user_id);
     }
 
-    /// Records activity (resets idle timer).
-    pub fn record_activity(&self, user_id: Uuid) {
-        self.activity.record_activity(user_id);
+    /// Mark a user as offline
+    pub fn set_offline(&self, user_id: Uuid) -> OutboundMessage {
+        let username = self
+            .usernames
+            .remove(&user_id)
+            .map(|(_, n)| n)
+            .unwrap_or_else(|| "unknown".to_string());
+
+        self.statuses.remove(&user_id);
+        self.activity.remove(user_id);
+
+        OutboundMessage::UserOffline {
+            user_id,
+            username,
+            timestamp: Utc::now(),
+        }
     }
 
-    /// Returns all online users.
-    pub fn online_users(&self) -> Vec<UserPresence> {
-        self.online
+    /// Update a user's status
+    pub fn update_status(&self, user_id: Uuid, status: PresenceStatus) -> OutboundMessage {
+        let username = self
+            .usernames
+            .get(&user_id)
+            .map(|r| r.value().clone())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        self.statuses.insert(user_id, status.clone());
+        self.activity.record(user_id);
+
+        OutboundMessage::PresenceChanged {
+            user_id,
+            username,
+            status: status.as_str().to_string(),
+            timestamp: Utc::now(),
+        }
+    }
+
+    /// Get a user's current status
+    pub fn get_status(&self, user_id: Uuid) -> PresenceStatus {
+        self.statuses
+            .get(&user_id)
+            .map(|r| r.value().clone())
+            .unwrap_or(PresenceStatus::Offline)
+    }
+
+    /// Check if a user is online
+    pub fn is_online(&self, user_id: Uuid) -> bool {
+        self.statuses.contains_key(&user_id)
+    }
+
+    /// Get all online users with their statuses
+    pub fn all_online(&self) -> Vec<OnlineUser> {
+        self.statuses
             .iter()
-            .map(|entry| entry.value().clone())
+            .map(|r| {
+                let user_id = *r.key();
+                let username = self
+                    .usernames
+                    .get(&user_id)
+                    .map(|n| n.value().clone())
+                    .unwrap_or_default();
+                OnlineUser {
+                    user_id,
+                    username,
+                    status: r.value().clone(),
+                }
+            })
             .collect()
     }
 
-    /// Checks if a user is online.
-    pub fn is_online(&self, user_id: &Uuid) -> bool {
-        self.online.contains_key(user_id)
-    }
-
-    /// Returns the count of online users.
+    /// Get online user count
     pub fn online_count(&self) -> usize {
-        self.online.len()
+        self.statuses.len()
     }
 
-    /// Gets presence info for a specific user.
-    pub fn get_presence(&self, user_id: &Uuid) -> Option<UserPresence> {
-        self.online.get(user_id).map(|entry| entry.value().clone())
-    }
-
-    /// Returns users that have been idle longer than the threshold.
-    pub fn idle_users(&self, idle_threshold_secs: i64) -> Vec<Uuid> {
-        self.activity.idle_users(idle_threshold_secs)
-    }
-
-    /// Transitions idle users to idle status.
-    pub fn mark_idle_users(&self, idle_threshold_secs: i64) {
-        let idle = self.activity.idle_users(idle_threshold_secs);
-        for user_id in &idle {
-            if let Some(mut presence) = self.online.get_mut(user_id) {
-                if presence.status == PresenceStatus::Active {
-                    presence.status = PresenceStatus::Idle;
-                }
-            }
-        }
+    /// Record activity (touch)
+    pub fn record_activity(&self, user_id: Uuid) {
+        self.activity.record(user_id);
     }
 }
 
@@ -116,4 +130,15 @@ impl Default for PresenceTracker {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Online user info
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OnlineUser {
+    /// User ID
+    pub user_id: Uuid,
+    /// Username
+    pub username: String,
+    /// Presence status
+    pub status: PresenceStatus,
 }

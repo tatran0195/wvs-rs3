@@ -1,8 +1,6 @@
-//! Admin session monitoring, termination, and broadcast via WebSocket.
+//! Admin session monitoring and control.
 
 pub mod audit;
 pub mod broadcast;
 pub mod monitor;
 pub mod terminator;
-
-pub use monitor::SessionMonitor;

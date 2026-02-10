@@ -1,68 +1,57 @@
 //! Notification persistence for offline users.
 
-use std::sync::Arc;
-
-use chrono::Utc;
-use tracing::{error, info};
 use uuid::Uuid;
 
 use filehub_core::error::AppError;
-use filehub_database::repositories::notification::NotificationRepository;
-use filehub_entity::notification::Notification;
+use filehub_core::types::id::UserId;
 
-/// Persists notifications for users who are offline.
-#[derive(Debug, Clone)]
-pub struct NotificationPersistence {
-    /// Notification repository.
-    repo: Arc<NotificationRepository>,
-    /// Maximum stored notifications per user.
-    max_per_user: usize,
-}
+use crate::message::types::OutboundMessage;
 
-impl NotificationPersistence {
-    /// Creates a new persistence handler.
-    pub fn new(repo: Arc<NotificationRepository>, max_per_user: usize) -> Self {
-        Self { repo, max_per_user }
-    }
-
-    /// Persists a notification for an offline user.
-    pub async fn persist_for_user(
-        &self,
-        user_id: Uuid,
-        category: &str,
-        event_type: &str,
-        title: &str,
-        message: &str,
-        payload: Option<serde_json::Value>,
-        priority: &str,
-        actor_id: Option<Uuid>,
-        resource_type: Option<&str>,
-        resource_id: Option<Uuid>,
-    ) -> Result<(), AppError> {
-        let notification = Notification {
-            id: Uuid::new_v4(),
-            user_id,
-            category: category.to_string(),
-            event_type: event_type.to_string(),
-            title: title.to_string(),
-            message: message.to_string(),
-            payload,
-            priority: priority.to_string(),
+/// Store a notification for an offline user.
+///
+/// The notification will be delivered when the user comes back online
+/// or fetched via the REST API.
+pub async fn persist_for_offline(
+    notification_service: &filehub_service::notification::service::NotificationService,
+    user_id: UserId,
+    msg: &OutboundMessage,
+) -> Result<(), AppError> {
+    if let OutboundMessage::Notification {
+        id,
+        category,
+        event_type,
+        title,
+        message,
+        payload,
+        priority,
+        actor_id,
+        resource_type,
+        resource_id,
+        timestamp,
+        ..
+    } = msg
+    {
+        let notification = filehub_entity::notification::model::Notification {
+            id: *id,
+            user_id: *user_id,
+            category: category.clone(),
+            event_type: event_type.clone(),
+            title: title.clone(),
+            message: message.clone(),
+            payload: payload.clone(),
+            priority: priority.clone(),
             is_read: false,
             read_at: None,
             is_dismissed: false,
-            actor_id,
-            resource_type: resource_type.map(String::from),
-            resource_id,
-            created_at: Utc::now(),
+            actor_id: *actor_id,
+            resource_type: resource_type.clone(),
+            resource_id: *resource_id,
+            created_at: *timestamp,
             expires_at: None,
         };
 
-        self.repo
-            .create(&notification)
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to persist notification: {e}")))?;
-
-        Ok(())
+        notification_service.create(notification).await?;
     }
+
+    Ok(())
 }

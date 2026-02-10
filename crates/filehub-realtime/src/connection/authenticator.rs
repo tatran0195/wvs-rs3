@@ -1,54 +1,44 @@
-//! WebSocket authentication — validates JWT from query parameter or first message.
+//! JWT authentication for WebSocket connections.
 
 use std::sync::Arc;
 
-use uuid::Uuid;
+use tracing;
 
-use filehub_auth::jwt::{Claims, JwtDecoder};
+use filehub_auth::jwt::claims::Claims;
+use filehub_auth::jwt::decoder::JwtDecoder;
 use filehub_core::error::AppError;
-use filehub_entity::user::UserRole;
+use filehub_core::types::id::{SessionId, UserId};
+use filehub_entity::user::role::UserRole;
 
-/// Authenticated connection info extracted from JWT.
+/// Authenticated WebSocket user
 #[derive(Debug, Clone)]
-pub struct AuthenticatedConnection {
-    /// User ID.
-    pub user_id: Uuid,
-    /// Session ID.
-    pub session_id: Uuid,
-    /// User role.
-    pub role: UserRole,
-    /// Username.
+pub struct WsAuthUser {
+    /// User ID
+    pub user_id: UserId,
+    /// Session ID
+    pub session_id: SessionId,
+    /// Username
     pub username: String,
+    /// User role
+    pub role: UserRole,
 }
 
-/// Authenticates WebSocket connections using JWT tokens.
-#[derive(Clone)]
-pub struct WsAuthenticator {
-    /// JWT decoder.
-    decoder: Arc<JwtDecoder>,
-}
+/// Authenticate a WebSocket connection from a JWT token.
+///
+/// Token is typically passed as a query parameter: `/ws?token={jwt}`
+pub async fn authenticate_ws(
+    token: &str,
+    decoder: &Arc<JwtDecoder>,
+) -> Result<WsAuthUser, AppError> {
+    let claims = decoder.decode(token).await.map_err(|e| {
+        tracing::warn!("WS auth failed: {}", e);
+        AppError::unauthorized("Invalid or expired token")
+    })?;
 
-impl std::fmt::Debug for WsAuthenticator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WsAuthenticator").finish()
-    }
-}
-
-impl WsAuthenticator {
-    /// Creates a new WebSocket authenticator.
-    pub fn new(decoder: Arc<JwtDecoder>) -> Self {
-        Self { decoder }
-    }
-
-    /// Authenticates a connection using a JWT token (typically from query parameter).
-    pub async fn authenticate(&self, token: &str) -> Result<AuthenticatedConnection, AppError> {
-        let claims = self.decoder.decode_access_token(token).await?;
-
-        Ok(AuthenticatedConnection {
-            user_id: claims.user_id(),
-            session_id: claims.session_id(),
-            role: claims.role,
-            username: claims.username,
-        })
-    }
+    Ok(WsAuthUser {
+        user_id: UserId::from(claims.user_id),
+        session_id: SessionId::from(claims.session_id),
+        username: claims.username,
+        role: claims.role,
+    })
 }

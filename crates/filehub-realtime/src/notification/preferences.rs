@@ -1,60 +1,73 @@
 //! User notification preference checking.
 
-use std::sync::Arc;
+use std::collections::HashMap;
 
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
-use filehub_core::error::AppError;
-use filehub_database::repositories::notification::NotificationRepository;
-
-/// Checks user notification preferences to decide delivery.
-#[derive(Debug, Clone)]
-pub struct PreferenceChecker {
-    /// Notification repository for preference lookups.
-    repo: Arc<NotificationRepository>,
+/// User notification preferences
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserPreferences {
+    /// Per-category settings
+    pub categories: HashMap<String, CategoryPreference>,
+    /// Global mute
+    pub muted: bool,
+    /// Do not disturb mode
+    pub dnd: bool,
 }
 
-impl PreferenceChecker {
-    /// Creates a new preference checker.
-    pub fn new(repo: Arc<NotificationRepository>) -> Self {
-        Self { repo }
+/// Preference for a notification category
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryPreference {
+    /// Whether this category is enabled
+    pub enabled: bool,
+    /// Minimum priority to show ("low", "normal", "high", etc.)
+    pub min_priority: String,
+}
+
+impl Default for UserPreferences {
+    fn default() -> Self {
+        Self {
+            categories: HashMap::new(),
+            muted: false,
+            dnd: false,
+        }
     }
+}
 
-    /// Checks whether a user wants to receive notifications of a given category and event type.
-    pub async fn should_deliver(
-        &self,
-        user_id: Uuid,
-        category: &str,
-        event_type: &str,
-    ) -> Result<bool, AppError> {
-        let prefs = self
-            .repo
-            .get_preferences(user_id)
-            .await
-            .map_err(|e| AppError::internal(format!("Preference lookup failed: {e}")))?;
-
-        // Check if category is muted
-        if let Some(muted) = prefs.preferences.get("muted_categories") {
-            if let Some(muted_list) = muted.as_array() {
-                for item in muted_list {
-                    if item.as_str() == Some(category) {
-                        return Ok(false);
-                    }
-                }
-            }
+impl UserPreferences {
+    /// Check if a notification should be delivered based on preferences
+    pub fn should_deliver(&self, category: &str, priority: &str) -> bool {
+        if self.muted {
+            return false;
         }
 
-        // Check if specific event type is muted
-        if let Some(muted) = prefs.preferences.get("muted_events") {
-            if let Some(muted_list) = muted.as_array() {
-                for item in muted_list {
-                    if item.as_str() == Some(event_type) {
-                        return Ok(false);
-                    }
-                }
-            }
+        if self.dnd {
+            // Only deliver critical in DND mode
+            return priority == "critical" || priority == "urgent";
         }
 
-        Ok(true)
+        if let Some(pref) = self.categories.get(category) {
+            if !pref.enabled {
+                return false;
+            }
+            priority_gte(priority, &pref.min_priority)
+        } else {
+            true // Default: deliver if no preference set
+        }
     }
+}
+
+/// Compare priorities: is `a` >= `b`?
+fn priority_gte(a: &str, b: &str) -> bool {
+    let val = |p: &str| -> i32 {
+        match p {
+            "low" => 0,
+            "normal" => 1,
+            "high" => 2,
+            "urgent" => 3,
+            "critical" => 4,
+            _ => 1,
+        }
+    };
+    val(a) >= val(b)
 }

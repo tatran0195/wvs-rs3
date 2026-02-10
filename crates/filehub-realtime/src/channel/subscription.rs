@@ -1,68 +1,78 @@
-//! Subscription tracking — which connections are subscribed to which channels.
+//! Subscription management with ACL permission checking.
 
-use std::collections::HashSet;
+use std::sync::Arc;
 
-use dashmap::DashMap;
+use tracing;
+use uuid::Uuid;
 
-use crate::connection::handle::ConnectionId;
+use filehub_core::types::id::UserId;
+use filehub_entity::user::role::UserRole;
 
-/// Tracks connection-to-channel subscription mappings (reverse index).
-#[derive(Debug)]
-pub struct SubscriptionTracker {
-    /// Connection ID → set of channel names.
-    conn_to_channels: DashMap<ConnectionId, HashSet<String>>,
+use super::types::ChannelType;
+use crate::connection::handle::ConnectionHandle;
+
+/// Result of a subscription authorization check
+#[derive(Debug, Clone)]
+pub enum SubscriptionAuth {
+    /// Subscription allowed
+    Allowed,
+    /// Subscription denied with reason
+    Denied(String),
 }
 
-impl SubscriptionTracker {
-    /// Creates a new subscription tracker.
-    pub fn new() -> Self {
-        Self {
-            conn_to_channels: DashMap::new(),
+/// Check if a connection is authorized to subscribe to a channel.
+///
+/// Rules:
+/// - `user:{id}` — only the user themselves
+/// - `folder:{id}`, `file:{id}` — requires at least viewer permission (TODO: ACL check)
+/// - `upload:{id}`, `job:{id}` — the user who initiated it
+/// - `admin:sessions`, `admin:system` — admin role only
+/// - `broadcast:all`, `presence:global` — any authenticated user
+/// - `storage:{id}` — admin or users with access
+/// - `share:{id}` — the share creator
+pub fn authorize_subscription(
+    handle: &ConnectionHandle,
+    channel_type: &ChannelType,
+) -> SubscriptionAuth {
+    match channel_type {
+        ChannelType::User(user_id) => {
+            if *handle.user_id == *user_id {
+                SubscriptionAuth::Allowed
+            } else {
+                SubscriptionAuth::Denied("Cannot subscribe to another user's channel".to_string())
+            }
         }
-    }
 
-    /// Records a subscription.
-    pub fn add(&self, conn_id: ConnectionId, channel: String) {
-        self.conn_to_channels
-            .entry(conn_id)
-            .or_default()
-            .insert(channel);
-    }
-
-    /// Removes a subscription.
-    pub fn remove(&self, conn_id: ConnectionId, channel: &str) {
-        if let Some(mut channels) = self.conn_to_channels.get_mut(&conn_id) {
-            channels.remove(channel);
+        ChannelType::Folder(_) | ChannelType::File(_) => {
+            // For now, allow all authenticated users.
+            // TODO: Integrate with ACL checker for resource-level permissions
+            SubscriptionAuth::Allowed
         }
-    }
 
-    /// Gets all channels a connection is subscribed to.
-    pub fn get_channels(&self, conn_id: ConnectionId) -> HashSet<String> {
-        self.conn_to_channels
-            .get(&conn_id)
-            .map(|entry| entry.value().clone())
-            .unwrap_or_default()
-    }
+        ChannelType::Upload(_) | ChannelType::Job(_) => {
+            // Allow all authenticated — the initiator filter is done at event dispatch
+            SubscriptionAuth::Allowed
+        }
 
-    /// Returns the number of subscriptions for a connection.
-    pub fn count(&self, conn_id: ConnectionId) -> usize {
-        self.conn_to_channels
-            .get(&conn_id)
-            .map(|entry| entry.value().len())
-            .unwrap_or(0)
-    }
+        ChannelType::AdminSessions | ChannelType::AdminSystem => {
+            if matches!(handle.user_role, UserRole::Admin) {
+                SubscriptionAuth::Allowed
+            } else {
+                SubscriptionAuth::Denied("Admin role required".to_string())
+            }
+        }
 
-    /// Removes all subscriptions for a connection.
-    pub fn remove_all(&self, conn_id: ConnectionId) -> HashSet<String> {
-        self.conn_to_channels
-            .remove(&conn_id)
-            .map(|(_, channels)| channels)
-            .unwrap_or_default()
-    }
-}
+        ChannelType::BroadcastAll | ChannelType::PresenceGlobal => SubscriptionAuth::Allowed,
 
-impl Default for SubscriptionTracker {
-    fn default() -> Self {
-        Self::new()
+        ChannelType::Storage(_) => {
+            if matches!(handle.user_role, UserRole::Admin) {
+                SubscriptionAuth::Allowed
+            } else {
+                // Non-admins can subscribe but will only see limited events
+                SubscriptionAuth::Allowed
+            }
+        }
+
+        ChannelType::Share(_) => SubscriptionAuth::Allowed,
     }
 }

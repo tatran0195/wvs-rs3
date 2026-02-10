@@ -1,16 +1,21 @@
-//! JSON serialization helpers for WebSocket messages.
+//! JSON serialization for WebSocket messages.
 
-use super::types::OutboundMessage;
-use filehub_core::error::AppError;
+use serde_json;
 
-/// Serializes an outbound message to JSON.
-pub fn serialize(msg: &OutboundMessage) -> Result<String, AppError> {
-    serde_json::to_string(msg)
-        .map_err(|e| AppError::internal(format!("Message serialization failed: {e}")))
+use super::envelope::MessageEnvelope;
+use super::types::{InboundMessage, OutboundMessage};
+
+/// Serialize an outbound message envelope to JSON
+pub fn serialize_envelope(envelope: &MessageEnvelope) -> Result<String, serde_json::Error> {
+    serde_json::to_string(envelope)
 }
 
-/// Deserializes an inbound message from JSON.
-pub fn deserialize_inbound(raw: &str) -> Result<super::types::InboundMessage, AppError> {
-    serde_json::from_str(raw)
-        .map_err(|e| AppError::validation(format!("Invalid message format: {e}")))
+/// Serialize an outbound message directly (without envelope)
+pub fn serialize_outbound(msg: &OutboundMessage) -> Result<String, serde_json::Error> {
+    serde_json::to_string(msg)
+}
+
+/// Deserialize an inbound message from JSON
+pub fn deserialize_inbound(text: &str) -> Result<InboundMessage, serde_json::Error> {
+    serde_json::from_str(text)
 }

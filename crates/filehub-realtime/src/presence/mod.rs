@@ -1,4 +1,4 @@
-//! User presence tracking — online, idle, away, dnd, offline.
+//! User presence tracking.
 
 pub mod activity;
 pub mod status;

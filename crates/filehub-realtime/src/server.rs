@@ -1,99 +1,86 @@
-//! Top-level real-time engine that ties together all subsystems.
+//! WebSocket server setup and engine initialization.
 
 use std::sync::Arc;
 
-use tokio::sync::broadcast;
-use tracing::info;
+use tracing;
 
+use filehub_auth::jwt::decoder::JwtDecoder;
 use filehub_core::config::RealtimeConfig;
-use filehub_core::error::AppError;
+use filehub_database::repositories::session::SessionRepository;
+use filehub_service::notification::service::NotificationService;
 
-use crate::bridge::event_bridge::EventBridge;
 use crate::channel::registry::ChannelRegistry;
 use crate::connection::manager::ConnectionManager;
-use crate::metrics::RealtimeMetrics;
+use crate::metrics::EngineMetrics;
 use crate::notification::dispatcher::NotificationDispatcher;
 use crate::presence::tracker::PresenceTracker;
 use crate::session_control::monitor::SessionMonitor;
 
-/// Central real-time engine that coordinates all WebSocket subsystems.
-#[derive(Clone)]
+/// Core realtime engine holding all subsystems.
+#[derive(Debug)]
 pub struct RealtimeEngine {
-    /// Connection manager.
+    /// Configuration
+    pub config: RealtimeConfig,
+    /// Connection manager
     pub connections: Arc<ConnectionManager>,
-    /// Channel registry.
+    /// Channel registry
     pub channels: Arc<ChannelRegistry>,
-    /// Notification dispatcher.
+    /// Notification dispatcher
     pub notifications: Arc<NotificationDispatcher>,
-    /// Presence tracker.
+    /// Presence tracker
     pub presence: Arc<PresenceTracker>,
-    /// Session monitor (admin).
+    /// Session monitor (admin)
     pub session_monitor: Arc<SessionMonitor>,
-    /// Event bridge (domain events → notifications).
-    pub event_bridge: Arc<EventBridge>,
-    /// Metrics collector.
-    pub metrics: Arc<RealtimeMetrics>,
-    /// Shutdown signal sender.
-    shutdown_tx: broadcast::Sender<()>,
-}
-
-impl std::fmt::Debug for RealtimeEngine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RealtimeEngine").finish()
-    }
+    /// Engine metrics
+    pub metrics: Arc<EngineMetrics>,
+    /// JWT decoder for WS auth
+    pub jwt_decoder: Arc<JwtDecoder>,
+    /// Session repository
+    pub session_repo: Arc<SessionRepository>,
 }
 
 impl RealtimeEngine {
-    /// Creates a new real-time engine with all subsystems.
-    pub fn new(config: RealtimeConfig) -> Self {
-        let (shutdown_tx, _) = broadcast::channel(1);
-
-        let metrics = Arc::new(RealtimeMetrics::new());
+    /// Create and initialize the realtime engine.
+    pub async fn new(
+        config: &RealtimeConfig,
+        jwt_decoder: Arc<JwtDecoder>,
+        session_repo: Arc<SessionRepository>,
+        notification_service: Arc<NotificationService>,
+    ) -> Self {
+        let metrics = Arc::new(EngineMetrics::new());
         let channels = Arc::new(ChannelRegistry::new(config.channel_buffer_size));
-        let presence = Arc::new(PresenceTracker::new());
         let connections = Arc::new(ConnectionManager::new(
-            config.clone(),
-            channels.clone(),
-            presence.clone(),
-            metrics.clone(),
+            config.max_connections_per_user,
+            config.max_subscriptions_per_connection,
         ));
+        let presence = Arc::new(PresenceTracker::new());
         let notifications = Arc::new(NotificationDispatcher::new(
-            connections.clone(),
-            config.clone(),
+            Arc::clone(&connections),
+            notification_service,
+            config.notifications.clone(),
         ));
-        let session_monitor = Arc::new(SessionMonitor::new(connections.clone(), channels.clone()));
-        let event_bridge = Arc::new(EventBridge::new(notifications.clone()));
+        let session_monitor = Arc::new(SessionMonitor::new(
+            Arc::clone(&connections),
+            Arc::clone(&session_repo),
+        ));
 
-        info!("Real-time engine initialized");
+        tracing::info!(
+            "Realtime engine created: max_conn_per_user={}, channel_buf={}, max_subs={}",
+            config.max_connections_per_user,
+            config.channel_buffer_size,
+            config.max_subscriptions_per_connection,
+        );
 
         Self {
+            config: config.clone(),
             connections,
             channels,
             notifications,
             presence,
             session_monitor,
-            event_bridge,
             metrics,
-            shutdown_tx,
+            jwt_decoder,
+            session_repo,
         }
-    }
-
-    /// Returns a shutdown receiver for graceful shutdown coordination.
-    pub fn shutdown_receiver(&self) -> broadcast::Receiver<()> {
-        self.shutdown_tx.subscribe()
-    }
-
-    /// Initiates a graceful shutdown of the real-time engine.
-    pub async fn shutdown(&self) -> Result<(), AppError> {
-        info!("Shutting down real-time engine");
-
-        // Signal all tasks to stop
-        let _ = self.shutdown_tx.send(());
-
-        // Close all connections
-        self.connections.close_all().await;
-
-        info!("Real-time engine shut down");
-        Ok(())
     }
 }

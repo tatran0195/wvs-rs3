@@ -1,4 +1,4 @@
-//! Notification dispatch, deduplication, formatting, persistence, and preference checking.
+//! Notification dispatch system.
 
 pub mod dedup;
 pub mod dispatcher;

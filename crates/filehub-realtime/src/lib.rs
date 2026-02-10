@@ -1,12 +1,12 @@
-//! # filehub-realtime
+//! WebSocket real-time engine for FileHub.
 //!
-//! Real-time WebSocket engine for Suzuki FileHub. Provides:
-//!
+//! Provides:
 //! - WebSocket connection management with JWT authentication
-//! - Pub/sub channel system with typed channels
-//! - Real-time notification dispatch with deduplication
+//! - Typed pub/sub channels with ACL-aware subscriptions
+//! - Real-time notification dispatch (online → WS, offline → persist)
 //! - User presence tracking (online/idle/away/dnd/offline)
-//! - Admin session monitoring and broadcast
+//! - Admin session monitoring and control
+//! - Domain event → notification bridging
 //! - Multi-node support via Redis pub/sub bridge
 
 pub mod bridge;
@@ -19,9 +19,4 @@ pub mod presence;
 pub mod server;
 pub mod session_control;
 
-pub use channel::registry::ChannelRegistry;
-pub use connection::manager::ConnectionManager;
-pub use notification::dispatcher::NotificationDispatcher;
-pub use presence::tracker::PresenceTracker;
 pub use server::RealtimeEngine;
-pub use session_control::monitor::SessionMonitor;

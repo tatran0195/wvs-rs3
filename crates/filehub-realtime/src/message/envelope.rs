@@ -1,60 +1,45 @@
-//! Message envelope wrapping for routing.
+//! Message envelope for framing WebSocket messages.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Envelope wrapping a message with routing metadata.
+use super::types::OutboundMessage;
+
+/// Envelope wrapping outbound messages with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageEnvelope {
-    /// Unique envelope ID.
-    pub id: Uuid,
-    /// Target channel (if channel-targeted).
+    /// Unique message ID for deduplication and ack
+    pub id: String,
+    /// Channel this message was sent on (if any)
     pub channel: Option<String>,
-    /// Target user ID (if user-targeted).
-    pub user_id: Option<Uuid>,
-    /// Target session ID (if session-targeted).
-    pub session_id: Option<Uuid>,
-    /// The serialized message payload.
-    pub payload: String,
-    /// When the envelope was created.
-    pub created_at: DateTime<Utc>,
+    /// The message payload
+    pub data: OutboundMessage,
+    /// When the message was created
+    pub timestamp: DateTime<Utc>,
+    /// Sequence number (per connection)
+    pub seq: u64,
 }
 
 impl MessageEnvelope {
-    /// Creates a channel-targeted envelope.
-    pub fn for_channel(channel: &str, payload: String) -> Self {
+    /// Create a new envelope wrapping a message
+    pub fn new(data: OutboundMessage, channel: Option<String>, seq: u64) -> Self {
         Self {
-            id: Uuid::new_v4(),
-            channel: Some(channel.to_string()),
-            user_id: None,
-            session_id: None,
-            payload,
-            created_at: Utc::now(),
+            id: Uuid::new_v4().to_string(),
+            channel,
+            data,
+            timestamp: Utc::now(),
+            seq,
         }
     }
 
-    /// Creates a user-targeted envelope.
-    pub fn for_user(user_id: Uuid, payload: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            channel: None,
-            user_id: Some(user_id),
-            session_id: None,
-            payload,
-            created_at: Utc::now(),
-        }
+    /// Create an envelope for a direct (non-channel) message
+    pub fn direct(data: OutboundMessage, seq: u64) -> Self {
+        Self::new(data, None, seq)
     }
 
-    /// Creates a session-targeted envelope.
-    pub fn for_session(session_id: Uuid, payload: String) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            channel: None,
-            user_id: None,
-            session_id: Some(session_id),
-            payload,
-            created_at: Utc::now(),
-        }
+    /// Create an envelope for a channel message
+    pub fn on_channel(data: OutboundMessage, channel: &str, seq: u64) -> Self {
+        Self::new(data, Some(channel.to_string()), seq)
     }
 }

@@ -1,49 +1,64 @@
-//! Single channel with subscriber tracking.
+//! Individual channel with subscriber tracking.
 
-use std::collections::HashSet;
+use std::sync::Arc;
+
+use dashmap::DashSet;
+use uuid::Uuid;
 
 use crate::connection::handle::ConnectionId;
+use crate::message::types::OutboundMessage;
 
-/// A single pub/sub channel with a set of subscribers.
-#[derive(Debug, Clone)]
+use super::types::ChannelType;
+
+/// A pub/sub channel that tracks subscribers.
+#[derive(Debug)]
 pub struct Channel {
-    /// Channel name.
+    /// Channel type
+    pub channel_type: ChannelType,
+    /// Channel name (canonical string)
     pub name: String,
-    /// Set of subscribed connection IDs.
-    pub subscribers: HashSet<ConnectionId>,
+    /// Set of subscribed connection IDs
+    subscribers: DashSet<ConnectionId>,
 }
 
 impl Channel {
-    /// Creates a new empty channel.
-    pub fn new(name: String) -> Self {
+    /// Create a new channel
+    pub fn new(channel_type: ChannelType) -> Self {
+        let name = channel_type.to_channel_name();
         Self {
+            channel_type,
             name,
-            subscribers: HashSet::new(),
+            subscribers: DashSet::new(),
         }
     }
 
-    /// Adds a subscriber.
-    pub fn subscribe(&mut self, conn_id: ConnectionId) {
-        self.subscribers.insert(conn_id);
+    /// Add a subscriber
+    pub fn subscribe(&self, connection_id: ConnectionId) -> bool {
+        self.subscribers.insert(connection_id)
     }
 
-    /// Removes a subscriber.
-    pub fn unsubscribe(&mut self, conn_id: ConnectionId) {
-        self.subscribers.remove(&conn_id);
+    /// Remove a subscriber
+    pub fn unsubscribe(&self, connection_id: ConnectionId) -> bool {
+        self.subscribers.remove(&connection_id).is_some()
     }
 
-    /// Returns subscriber count.
+    /// Get subscriber count
     pub fn subscriber_count(&self) -> usize {
         self.subscribers.len()
     }
 
-    /// Returns whether the channel has any subscribers.
-    pub fn is_empty(&self) -> bool {
-        self.subscribers.is_empty()
+    /// Get all subscriber connection IDs
+    pub fn subscriber_ids(&self) -> Vec<ConnectionId> {
+        self.subscribers.iter().map(|r| *r).collect()
     }
 
-    /// Returns all subscriber connection IDs.
-    pub fn get_subscribers(&self) -> Vec<ConnectionId> {
-        self.subscribers.iter().copied().collect()
+    /// Check if a connection is subscribed
+    pub fn is_subscribed(&self, connection_id: ConnectionId) -> bool {
+        self.subscribers.contains(&connection_id)
+    }
+
+    /// Check if the channel has any subscribers
+    pub fn has_subscribers(&self) -> bool {
+        !self.subscribers.is_empty()
     }
 }

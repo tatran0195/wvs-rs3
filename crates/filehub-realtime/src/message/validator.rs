@@ -1,41 +1,48 @@
-//! Message validation rules.
+//! Message validation for inbound WebSocket messages.
 
 use super::types::InboundMessage;
-use filehub_core::error::AppError;
+use crate::channel::types::ChannelType;
 
-/// Maximum allowed message size in bytes.
-const MAX_MESSAGE_SIZE: usize = 65_536;
-
-/// Validates an inbound message.
-pub fn validate_inbound(raw: &str) -> Result<(), AppError> {
-    if raw.len() > MAX_MESSAGE_SIZE {
-        return Err(AppError::validation(format!(
-            "Message exceeds maximum size of {} bytes",
-            MAX_MESSAGE_SIZE
-        )));
-    }
-
-    if raw.trim().is_empty() {
-        return Err(AppError::validation("Empty message"));
-    }
-
-    Ok(())
+/// Validation error
+#[derive(Debug, Clone)]
+pub struct ValidationError {
+    /// Error message
+    pub message: String,
 }
 
-/// Validates channel name format.
-pub fn validate_channel_name(channel: &str) -> Result<(), AppError> {
-    if channel.is_empty() || channel.len() > 256 {
-        return Err(AppError::validation("Invalid channel name length"));
+/// Validate an inbound message
+pub fn validate_inbound(msg: &InboundMessage) -> Result<(), ValidationError> {
+    match msg {
+        InboundMessage::Subscribe { channel } => {
+            if channel.is_empty() {
+                return Err(ValidationError {
+                    message: "Channel name cannot be empty".to_string(),
+                });
+            }
+            if ChannelType::parse(channel).is_none() {
+                return Err(ValidationError {
+                    message: format!("Invalid channel format: '{}'", channel),
+                });
+            }
+            Ok(())
+        }
+        InboundMessage::Unsubscribe { channel } => {
+            if channel.is_empty() {
+                return Err(ValidationError {
+                    message: "Channel name cannot be empty".to_string(),
+                });
+            }
+            Ok(())
+        }
+        InboundMessage::PresenceUpdate { status } => {
+            let valid = ["active", "idle", "away", "dnd"];
+            if !valid.contains(&status.as_str()) {
+                return Err(ValidationError {
+                    message: format!("Invalid presence status '{}'. Valid: {:?}", status, valid),
+                });
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
-
-    if !channel
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == ':' || c == '-' || c == '_')
-    {
-        return Err(AppError::validation(
-            "Channel name contains invalid characters",
-        ));
-    }
-
-    Ok(())
 }

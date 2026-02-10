@@ -1,4 +1,4 @@
-//! WebSocket connection management — lifecycle, pool, handles, heartbeat, auth.
+//! WebSocket connection management.
 
 pub mod authenticator;
 pub mod handle;

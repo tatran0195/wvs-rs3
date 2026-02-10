@@ -1,4 +1,4 @@
-//! Bridges between domain events and the real-time notification system.
+//! Multi-node pub/sub bridge.
 
 pub mod event_bridge;
 pub mod memory_pubsub;

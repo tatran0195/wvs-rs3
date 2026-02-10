@@ -1,72 +1,68 @@
-//! Admin real-time session monitoring.
+//! Admin session monitor — provides real-time session view.
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::channel::registry::ChannelRegistry;
+use filehub_core::types::id::SessionId;
+use filehub_database::repositories::session::SessionRepository;
+
+use crate::connection::handle::ConnectionInfo;
 use crate::connection::manager::ConnectionManager;
 use crate::message::types::OutboundMessage;
 
-/// Session snapshot for admin monitoring.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionSnapshot {
-    /// Total active connections.
-    pub total_connections: usize,
-    /// Unique connected users.
-    pub unique_users: usize,
-    /// Active channel count.
-    pub active_channels: usize,
-}
-
-/// Provides real-time session monitoring for admins.
+/// Admin session monitor
 #[derive(Debug)]
 pub struct SessionMonitor {
-    /// Connection manager.
+    /// Connection manager
     connections: Arc<ConnectionManager>,
-    /// Channel registry.
-    channels: Arc<ChannelRegistry>,
+    /// Session repository
+    session_repo: Arc<SessionRepository>,
 }
 
 impl SessionMonitor {
-    /// Creates a new session monitor.
-    pub fn new(connections: Arc<ConnectionManager>, channels: Arc<ChannelRegistry>) -> Self {
+    /// Create a new session monitor
+    pub fn new(connections: Arc<ConnectionManager>, session_repo: Arc<SessionRepository>) -> Self {
         Self {
             connections,
-            channels,
+            session_repo,
         }
     }
 
-    /// Takes a snapshot of the current session state.
-    pub fn snapshot(&self) -> SessionSnapshot {
-        SessionSnapshot {
-            total_connections: self.connections.connection_count(),
-            unique_users: self.connections.user_count(),
-            active_channels: self.channels.channel_count(),
+    /// Get all active connection info for admin view
+    pub async fn get_live_sessions(&self) -> Vec<ConnectionInfo> {
+        self.connections.all_connection_info().await
+    }
+
+    /// Get real-time stats
+    pub fn get_stats(&self) -> SessionStats {
+        SessionStats {
+            total_connections: self.connections.total_connections(),
+            unique_users: self.connections.unique_users(),
+            timestamp: Utc::now(),
         }
     }
 
-    /// Pushes a session update to admin subscribers.
-    pub async fn push_update(&self) {
-        let snapshot = self.snapshot();
-
-        let message = OutboundMessage::Notification {
-            id: Uuid::new_v4(),
-            category: "admin".to_string(),
-            event_type: "session.snapshot".to_string(),
-            title: "Session Update".to_string(),
-            message: format!(
-                "{} connections, {} users",
-                snapshot.total_connections, snapshot.unique_users
-            ),
-            payload: Some(serde_json::to_value(&snapshot).unwrap_or_default()),
-            priority: "low".to_string(),
-            timestamp: chrono::Utc::now(),
-        };
-
-        self.connections
-            .broadcast_to_channel("admin:sessions", &message)
-            .await;
+    /// Emit session count update to admin channel
+    pub fn build_count_update(&self, total_seats: i32, available: i32) -> OutboundMessage {
+        OutboundMessage::SessionCountUpdated {
+            active_sessions: self.connections.total_connections() as i32,
+            total_seats,
+            available_seats: available,
+            timestamp: Utc::now(),
+        }
     }
+}
+
+/// Real-time session statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStats {
+    /// Total WebSocket connections
+    pub total_connections: usize,
+    /// Unique connected users
+    pub unique_users: usize,
+    /// Timestamp
+    pub timestamp: chrono::DateTime<Utc>,
 }

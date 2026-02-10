@@ -1,107 +1,188 @@
-//! Maps domain events to notification messages and dispatches them.
+//! Domain event → notification mapping.
+//!
+//! Bridges domain events from the service layer to the
+//! notification and channel system.
 
 use std::sync::Arc;
 
-use tracing::debug;
+use chrono::Utc;
+use tracing;
 use uuid::Uuid;
 
+use filehub_core::types::id::UserId;
+
+use crate::channel::types::ChannelType;
+use crate::connection::manager::ConnectionManager;
 use crate::message::types::OutboundMessage;
 use crate::notification::dispatcher::NotificationDispatcher;
-use crate::notification::formatter::NotificationFormatter;
+use crate::notification::formatter;
+use crate::presence::tracker::PresenceTracker;
 
-/// Bridges domain events to the notification system.
+/// Bridges domain events into the realtime system.
 #[derive(Debug)]
 pub struct EventBridge {
-    /// Notification dispatcher.
-    dispatcher: Arc<NotificationDispatcher>,
+    /// Connection manager
+    connections: Arc<ConnectionManager>,
+    /// Notification dispatcher
+    notifications: Arc<NotificationDispatcher>,
+    /// Presence tracker
+    presence: Arc<PresenceTracker>,
 }
 
 impl EventBridge {
-    /// Creates a new event bridge.
-    pub fn new(dispatcher: Arc<NotificationDispatcher>) -> Self {
-        Self { dispatcher }
+    /// Create a new event bridge
+    pub fn new(
+        connections: Arc<ConnectionManager>,
+        notifications: Arc<NotificationDispatcher>,
+        presence: Arc<PresenceTracker>,
+    ) -> Self {
+        Self {
+            connections,
+            notifications,
+            presence,
+        }
     }
 
-    /// Handles a file uploaded event.
-    pub async fn on_file_uploaded(
+    /// Handle a file created event
+    pub async fn on_file_created(
         &self,
         file_id: Uuid,
-        filename: &str,
-        folder_name: &str,
-        uploader: &str,
-        subscriber_ids: &[Uuid],
+        file_name: &str,
+        folder_id: Uuid,
+        actor_id: Uuid,
+        actor_name: &str,
+        size_bytes: i64,
+        mime_type: Option<String>,
     ) {
-        let message =
-            NotificationFormatter::file_uploaded(filename, folder_name, uploader, file_id);
-
-        self.dispatcher
-            .dispatch_to_users(subscriber_ids, "file.uploaded", Some(file_id), message)
-            .await;
-
-        // Also broadcast to folder channel
-        let folder_msg =
-            NotificationFormatter::file_uploaded(filename, folder_name, uploader, file_id);
-        // Channel name would be constructed from folder ID — simplified here
-        debug!("File uploaded event bridged to notifications");
+        let channel = ChannelType::Folder(folder_id).to_channel_name();
+        let msg = OutboundMessage::FileCreated {
+            file_id,
+            file_name: file_name.to_string(),
+            folder_id,
+            actor_id,
+            actor_name: actor_name.to_string(),
+            size_bytes,
+            mime_type,
+            timestamp: Utc::now(),
+        };
+        self.notifications.dispatch_to_channel(&channel, msg).await;
     }
 
-    /// Handles a file deleted event.
+    /// Handle a file deleted event
     pub async fn on_file_deleted(
         &self,
         file_id: Uuid,
-        filename: &str,
-        actor: &str,
-        subscriber_ids: &[Uuid],
+        file_name: &str,
+        folder_id: Uuid,
+        actor_id: Uuid,
+        actor_name: &str,
     ) {
-        let message = NotificationFormatter::file_deleted(filename, actor, file_id);
-
-        self.dispatcher
-            .dispatch_to_users(subscriber_ids, "file.deleted", Some(file_id), message)
-            .await;
+        let channel = ChannelType::Folder(folder_id).to_channel_name();
+        let msg = OutboundMessage::FileDeleted {
+            file_id,
+            file_name: file_name.to_string(),
+            folder_id,
+            actor_id,
+            actor_name: actor_name.to_string(),
+            timestamp: Utc::now(),
+        };
+        self.notifications.dispatch_to_channel(&channel, msg).await;
     }
 
-    /// Handles a share created event.
-    pub async fn on_share_created(
-        &self,
-        share_id: Uuid,
-        resource_name: &str,
-        sharer: &str,
-        target_user_id: Uuid,
-    ) {
-        let message = NotificationFormatter::share_created(resource_name, sharer, share_id);
-
-        self.dispatcher
-            .dispatch_to_user(target_user_id, "share.created", Some(share_id), message)
-            .await;
-    }
-
-    /// Handles a session terminated event.
-    pub async fn on_session_terminated(
+    /// Handle a session created event (admin channel)
+    pub async fn on_session_created(
         &self,
         session_id: Uuid,
-        reason: &str,
-        terminated_by: Option<Uuid>,
+        user_id: Uuid,
+        username: &str,
+        ip_address: &str,
+        role: &str,
     ) {
-        self.dispatcher
-            .send_session_termination(session_id, reason, terminated_by)
-            .await;
+        let channel = ChannelType::AdminSessions.to_channel_name();
+        let msg = OutboundMessage::SessionCreated {
+            session_id: filehub_core::types::id::SessionId::from(session_id),
+            user_id,
+            username: username.to_string(),
+            ip_address: ip_address.to_string(),
+            role: role.to_string(),
+            timestamp: Utc::now(),
+        };
+        self.notifications.dispatch_to_channel(&channel, msg).await;
     }
 
-    /// Handles an upload progress event.
+    /// Handle an upload progress event
     pub async fn on_upload_progress(
         &self,
-        user_id: Uuid,
         upload_id: Uuid,
-        percent: u8,
-        status: &str,
+        file_name: &str,
+        chunk_number: i32,
+        total_chunks: i32,
+        bytes_uploaded: i64,
+        total_bytes: i64,
+        user_id: Uuid,
     ) {
-        self.dispatcher
-            .send_progress(user_id, upload_id, percent, status)
-            .await;
+        let channel = ChannelType::Upload(upload_id).to_channel_name();
+        let msg = crate::message::builder::build_upload_progress(
+            upload_id,
+            file_name,
+            chunk_number,
+            total_chunks,
+            bytes_uploaded,
+            total_bytes,
+        );
+        // Send to the upload channel (only the uploader subscribes)
+        self.notifications.dispatch_to_channel(&channel, msg).await;
     }
 
-    /// Returns a reference to the dispatcher.
-    pub fn dispatcher(&self) -> &Arc<NotificationDispatcher> {
-        &self.dispatcher
+    /// Handle a user coming online
+    pub async fn on_user_online(&self, user_id: Uuid, username: &str) {
+        let msg = self.presence.set_online(user_id, username);
+        let channel = ChannelType::PresenceGlobal.to_channel_name();
+        self.notifications.dispatch_to_channel(&channel, msg).await;
+    }
+
+    /// Handle a user going offline
+    pub async fn on_user_offline(&self, user_id: Uuid) {
+        let msg = self.presence.set_offline(user_id);
+        let channel = ChannelType::PresenceGlobal.to_channel_name();
+        self.notifications.dispatch_to_channel(&channel, msg).await;
+    }
+
+    /// Handle admin broadcast
+    pub async fn on_admin_broadcast(
+        &self,
+        broadcast_id: Uuid,
+        title: &str,
+        message: &str,
+        severity: &str,
+        persistent: bool,
+    ) {
+        let msg = crate::message::builder::build_admin_broadcast(
+            broadcast_id,
+            title,
+            message,
+            severity,
+            persistent,
+        );
+        self.notifications.broadcast(msg).await;
+    }
+
+    /// Handle pool status update (admin channel)
+    pub async fn on_pool_status_updated(
+        &self,
+        total_seats: i32,
+        checked_out: i32,
+        available: i32,
+        drift_detected: bool,
+    ) {
+        let channel = ChannelType::AdminSystem.to_channel_name();
+        let msg = OutboundMessage::PoolStatusUpdated {
+            total_seats,
+            checked_out,
+            available,
+            drift_detected,
+            timestamp: Utc::now(),
+        };
+        self.notifications.dispatch_to_channel(&channel, msg).await;
     }
 }

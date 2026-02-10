@@ -1,4 +1,4 @@
-//! Individual WebSocket connection handle — send, receive, close.
+//! Individual WebSocket connection handle.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,112 +8,172 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use filehub_entity::user::UserRole;
+use filehub_core::types::id::{SessionId, UserId};
+use filehub_entity::user::role::UserRole;
 
-/// Unique connection identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ConnectionId(pub Uuid);
+use crate::message::types::OutboundMessage;
 
-impl ConnectionId {
-    /// Creates a new random connection ID.
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
+/// Unique connection identifier
+pub type ConnectionId = Uuid;
 
-impl Default for ConnectionId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for ConnectionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Represents a single authenticated WebSocket connection.
-#[derive(Debug, Clone)]
+/// A handle to a single WebSocket connection.
+///
+/// Holds the sender channel for pushing messages to the client,
+/// plus metadata about the connected user and session.
+#[derive(Debug)]
 pub struct ConnectionHandle {
-    /// Unique connection identifier.
+    /// Unique connection ID
     pub id: ConnectionId,
-    /// Authenticated user ID.
-    pub user_id: Uuid,
-    /// Session ID from the JWT.
-    pub session_id: Uuid,
-    /// User role.
-    pub role: UserRole,
-    /// Username.
+    /// User who owns this connection
+    pub user_id: UserId,
+    /// Session this connection belongs to
+    pub session_id: SessionId,
+    /// User's role (cached for quick checks)
+    pub user_role: UserRole,
+    /// Username (cached for display)
     pub username: String,
-    /// Channel for sending messages to this connection.
-    pub tx: mpsc::Sender<String>,
-    /// When the connection was established.
+    /// Sender for outbound messages
+    pub sender: mpsc::Sender<OutboundMessage>,
+    /// Channels this connection is subscribed to
+    pub subscriptions: tokio::sync::RwLock<Vec<String>>,
+    /// When the connection was established
     pub connected_at: DateTime<Utc>,
-    /// Last activity timestamp.
-    pub last_activity: Arc<std::sync::atomic::AtomicI64>,
-    /// Whether the connection is still alive.
-    pub alive: Arc<AtomicBool>,
+    /// Last activity timestamp
+    pub last_activity: tokio::sync::RwLock<DateTime<Utc>>,
+    /// Last pong received
+    pub last_pong: tokio::sync::RwLock<DateTime<Utc>>,
+    /// Whether the connection is still alive
+    pub alive: AtomicBool,
 }
 
 impl ConnectionHandle {
-    /// Creates a new connection handle.
+    /// Create a new connection handle
     pub fn new(
-        user_id: Uuid,
-        session_id: Uuid,
-        role: UserRole,
+        user_id: UserId,
+        session_id: SessionId,
+        user_role: UserRole,
         username: String,
-        tx: mpsc::Sender<String>,
+        sender: mpsc::Sender<OutboundMessage>,
     ) -> Self {
+        let now = Utc::now();
         Self {
-            id: ConnectionId::new(),
+            id: Uuid::new_v4(),
             user_id,
             session_id,
-            role,
+            user_role,
             username,
-            tx,
-            connected_at: Utc::now(),
-            last_activity: Arc::new(std::sync::atomic::AtomicI64::new(Utc::now().timestamp())),
-            alive: Arc::new(AtomicBool::new(true)),
+            sender,
+            subscriptions: tokio::sync::RwLock::new(Vec::new()),
+            connected_at: now,
+            last_activity: tokio::sync::RwLock::new(now),
+            last_pong: tokio::sync::RwLock::new(now),
+            alive: AtomicBool::new(true),
         }
     }
 
-    /// Sends a text message to this connection.
-    pub async fn send(&self, message: String) -> Result<(), String> {
+    /// Send an outbound message to this connection
+    pub async fn send(&self, msg: OutboundMessage) -> bool {
         if !self.is_alive() {
-            return Err("Connection is closed".to_string());
+            return false;
         }
-
-        self.tx
-            .send(message)
-            .await
-            .map_err(|e| format!("Send failed: {e}"))
+        match self.sender.try_send(msg) {
+            Ok(_) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!("Connection {} send buffer full, dropping message", self.id);
+                false
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                self.mark_dead();
+                false
+            }
+        }
     }
 
-    /// Checks whether the connection is still alive.
+    /// Check if connection is alive
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::Relaxed)
+        self.alive.load(Ordering::SeqCst)
     }
 
-    /// Marks the connection as closed.
-    pub fn mark_closed(&self) {
-        self.alive.store(false, Ordering::Relaxed);
+    /// Mark connection as dead
+    pub fn mark_dead(&self) {
+        self.alive.store(false, Ordering::SeqCst);
     }
 
-    /// Updates the last activity timestamp.
-    pub fn touch(&self) {
-        self.last_activity
-            .store(Utc::now().timestamp(), Ordering::Relaxed);
+    /// Update last activity timestamp
+    pub async fn touch(&self) {
+        let mut la = self.last_activity.write().await;
+        *la = Utc::now();
     }
 
-    /// Returns the last activity as a DateTime.
-    pub fn last_activity_time(&self) -> DateTime<Utc> {
-        let ts = self.last_activity.load(Ordering::Relaxed);
-        DateTime::from_timestamp(ts, 0).unwrap_or_else(Utc::now)
+    /// Record a pong response
+    pub async fn record_pong(&self) {
+        let mut lp = self.last_pong.write().await;
+        *lp = Utc::now();
     }
 
-    /// Returns seconds since last activity.
-    pub fn idle_seconds(&self) -> i64 {
-        Utc::now().timestamp() - self.last_activity.load(Ordering::Relaxed)
+    /// Add a subscription
+    pub async fn subscribe(&self, channel: &str) -> bool {
+        let mut subs = self.subscriptions.write().await;
+        if subs.contains(&channel.to_string()) {
+            return false;
+        }
+        subs.push(channel.to_string());
+        true
     }
+
+    /// Remove a subscription
+    pub async fn unsubscribe(&self, channel: &str) -> bool {
+        let mut subs = self.subscriptions.write().await;
+        let before = subs.len();
+        subs.retain(|s| s != channel);
+        subs.len() < before
+    }
+
+    /// Get current subscription count
+    pub async fn subscription_count(&self) -> usize {
+        self.subscriptions.read().await.len()
+    }
+
+    /// Check if subscribed to a channel
+    pub async fn is_subscribed(&self, channel: &str) -> bool {
+        self.subscriptions.read().await.iter().any(|s| s == channel)
+    }
+
+    /// Get a snapshot of connection info
+    pub async fn info(&self) -> ConnectionInfo {
+        ConnectionInfo {
+            id: self.id,
+            user_id: self.user_id,
+            session_id: self.session_id,
+            username: self.username.clone(),
+            role: self.user_role.clone(),
+            connected_at: self.connected_at,
+            last_activity: *self.last_activity.read().await,
+            subscriptions: self.subscriptions.read().await.clone(),
+            alive: self.is_alive(),
+        }
+    }
+}
+
+/// Snapshot of connection info (serializable)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionInfo {
+    /// Connection ID
+    pub id: ConnectionId,
+    /// User ID
+    pub user_id: UserId,
+    /// Session ID
+    pub session_id: SessionId,
+    /// Username
+    pub username: String,
+    /// Role
+    pub role: UserRole,
+    /// Connected at
+    pub connected_at: DateTime<Utc>,
+    /// Last activity
+    pub last_activity: DateTime<Utc>,
+    /// Subscriptions
+    pub subscriptions: Vec<String>,
+    /// Is alive
+    pub alive: bool,
 }

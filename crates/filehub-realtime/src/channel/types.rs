@@ -3,60 +3,126 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Typed channel identifiers.
+/// All supported channel types in the system.
+///
+/// Channel names follow the format `{type}:{id}` or `{type}:{scope}`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", content = "id")]
 pub enum ChannelType {
-    /// Personal user channel — notifications, session events.
+    /// Per-user private channel: `user:{user_id}`
+    /// Receives: notifications, session events
     User(Uuid),
-    /// Folder channel — file changes in a folder.
+
+    /// Folder watch channel: `folder:{folder_id}`
+    /// Receives: file created/updated/deleted, folder changes
     Folder(Uuid),
-    /// File channel — file-specific events (lock, version).
+
+    /// File watch channel: `file:{file_id}`
+    /// Receives: file updated, version created, lock/unlock, comments
     File(Uuid),
-    /// Upload progress channel.
+
+    /// Upload progress channel: `upload:{upload_id}`
+    /// Receives: chunk progress, completion, errors
     Upload(Uuid),
-    /// Job progress channel.
+
+    /// Job progress channel: `job:{job_id}`
+    /// Receives: job started, progress, completed, failed
     Job(Uuid),
-    /// Admin session monitoring channel.
+
+    /// Admin sessions channel: `admin:sessions`
+    /// Receives: session created/terminated, seat changes
     AdminSessions,
-    /// Admin system events channel.
+
+    /// Admin system channel: `admin:system`
+    /// Receives: system health, worker status, storage alerts
     AdminSystem,
-    /// Global broadcast channel (all users).
+
+    /// Global broadcast channel: `broadcast:all`
+    /// Receives: admin broadcasts, system announcements
     BroadcastAll,
-    /// Global presence channel.
+
+    /// Global presence channel: `presence:global`
+    /// Receives: user online/offline/status changes
     PresenceGlobal,
+
+    /// Storage events channel: `storage:{storage_id}`
+    /// Receives: storage status changes, sync events, quota alerts
+    Storage(Uuid),
+
+    /// Share events channel: `share:{share_id}`
+    /// Receives: share accessed, download count, expiry warnings
+    Share(Uuid),
 }
 
 impl ChannelType {
-    /// Parses a channel string into a typed channel.
+    /// Parse a channel name string into a ChannelType.
+    ///
+    /// Format: `{type}:{id_or_scope}`
     pub fn parse(channel: &str) -> Option<Self> {
         let parts: Vec<&str> = channel.splitn(2, ':').collect();
-        match parts.as_slice() {
-            ["user", id] => Uuid::parse_str(id).ok().map(ChannelType::User),
-            ["folder", id] => Uuid::parse_str(id).ok().map(ChannelType::Folder),
-            ["file", id] => Uuid::parse_str(id).ok().map(ChannelType::File),
-            ["upload", id] => Uuid::parse_str(id).ok().map(ChannelType::Upload),
-            ["job", id] => Uuid::parse_str(id).ok().map(ChannelType::Job),
-            ["admin", "sessions"] => Some(ChannelType::AdminSessions),
-            ["admin", "system"] => Some(ChannelType::AdminSystem),
-            ["broadcast", "all"] => Some(ChannelType::BroadcastAll),
-            ["presence", "global"] => Some(ChannelType::PresenceGlobal),
+        if parts.len() != 2 {
+            return None;
+        }
+
+        match parts[0] {
+            "user" => Uuid::parse_str(parts[1]).ok().map(Self::User),
+            "folder" => Uuid::parse_str(parts[1]).ok().map(Self::Folder),
+            "file" => Uuid::parse_str(parts[1]).ok().map(Self::File),
+            "upload" => Uuid::parse_str(parts[1]).ok().map(Self::Upload),
+            "job" => Uuid::parse_str(parts[1]).ok().map(Self::Job),
+            "storage" => Uuid::parse_str(parts[1]).ok().map(Self::Storage),
+            "share" => Uuid::parse_str(parts[1]).ok().map(Self::Share),
+            "admin" => match parts[1] {
+                "sessions" => Some(Self::AdminSessions),
+                "system" => Some(Self::AdminSystem),
+                _ => None,
+            },
+            "broadcast" => match parts[1] {
+                "all" => Some(Self::BroadcastAll),
+                _ => None,
+            },
+            "presence" => match parts[1] {
+                "global" => Some(Self::PresenceGlobal),
+                _ => None,
+            },
             _ => None,
         }
     }
 
-    /// Converts back to a channel string.
-    pub fn to_channel_string(&self) -> String {
+    /// Convert to the canonical channel name string
+    pub fn to_channel_name(&self) -> String {
         match self {
-            ChannelType::User(id) => format!("user:{id}"),
-            ChannelType::Folder(id) => format!("folder:{id}"),
-            ChannelType::File(id) => format!("file:{id}"),
-            ChannelType::Upload(id) => format!("upload:{id}"),
-            ChannelType::Job(id) => format!("job:{id}"),
-            ChannelType::AdminSessions => "admin:sessions".to_string(),
-            ChannelType::AdminSystem => "admin:system".to_string(),
-            ChannelType::BroadcastAll => "broadcast:all".to_string(),
-            ChannelType::PresenceGlobal => "presence:global".to_string(),
+            Self::User(id) => format!("user:{}", id),
+            Self::Folder(id) => format!("folder:{}", id),
+            Self::File(id) => format!("file:{}", id),
+            Self::Upload(id) => format!("upload:{}", id),
+            Self::Job(id) => format!("job:{}", id),
+            Self::Storage(id) => format!("storage:{}", id),
+            Self::Share(id) => format!("share:{}", id),
+            Self::AdminSessions => "admin:sessions".to_string(),
+            Self::AdminSystem => "admin:system".to_string(),
+            Self::BroadcastAll => "broadcast:all".to_string(),
+            Self::PresenceGlobal => "presence:global".to_string(),
         }
+    }
+
+    /// Check if this channel requires admin role
+    pub fn requires_admin(&self) -> bool {
+        matches!(self, Self::AdminSessions | Self::AdminSystem)
+    }
+
+    /// Check if this is a user-specific private channel
+    pub fn is_user_channel(&self) -> bool {
+        matches!(self, Self::User(_))
+    }
+
+    /// Check if this channel is open to all authenticated users
+    pub fn is_public(&self) -> bool {
+        matches!(self, Self::BroadcastAll | Self::PresenceGlobal)
+    }
+}
+
+impl std::fmt::Display for ChannelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_channel_name())
     }
 }
