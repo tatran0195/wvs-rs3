@@ -1,9 +1,27 @@
 [package]
 name = "filehub-plugin-sdk"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+description = "Plugin development SDK for building FileHub plugins"
 
 [dependencies]
+filehub-core = { path = "../filehub-core" }
+filehub-plugin = { path = "../filehub-plugin" }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Types
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Errors
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }

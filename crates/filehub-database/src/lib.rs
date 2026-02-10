@@ -1,14 +1,10 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # filehub-database
+//!
+//! PostgreSQL database connection management and concrete repository
+//! implementations for all FileHub entities.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod connection;
+pub mod migration;
+pub mod repositories;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use connection::DatabasePool;

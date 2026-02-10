@@ -1,0 +1,132 @@
+[server]
+host = "127.0.0.1"
+port = 0
+workers = 1
+max_connections = 100
+request_timeout_seconds = 10
+shutdown_grace_seconds = 5
+
+[server.tls]
+enabled = false
+cert_path = ""
+key_path = ""
+
+[server.cors]
+allowed_origins = ["*"]
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+allowed_headers = ["*"]
+max_age_seconds = 3600
+
+[database]
+url = "postgres://filehub:password@localhost:5432/filehub_test"
+max_connections = 5
+min_connections = 1
+connect_timeout_seconds = 5
+idle_timeout_seconds = 60
+
+[cache]
+provider = "memory"
+default_ttl_seconds = 60
+
+[cache.redis]
+url = "redis://localhost:6379/1"
+pool_size = 2
+key_prefix = "filehub_test:"
+
+[cache.memory]
+max_capacity = 1000
+time_to_live_seconds = 60
+
+[auth]
+jwt_secret = "test-secret-do-not-use-in-production"
+jwt_access_ttl_minutes = 5
+jwt_refresh_ttl_hours = 1
+password_min_length = 6
+max_failed_attempts = 3
+lockout_duration_minutes = 1
+
+[session]
+idle_timeout_minutes = 5
+absolute_timeout_hours = 1
+heartbeat_interval_seconds = 10
+heartbeat_timeout_seconds = 30
+cleanup_interval_minutes = 60
+
+[session.limits]
+enabled = true
+overflow_strategy = "deny"
+
+[session.limits.by_role]
+admin = 2
+manager = 1
+creator = 1
+viewer = 0
+
+[session.admin_reservation]
+enabled = true
+reserved_seats = 1
+
+[storage]
+data_root = "/tmp/filehub_test"
+default_provider = "local"
+max_upload_size_bytes = 10485760
+chunk_size_bytes = 1048576
+thumbnail_sizes = [64, 128]
+
+[storage.local]
+root_path = "/tmp/filehub_test/storage/local"
+
+[storage.s3]
+enabled = false
+endpoint = ""
+region = "us-east-1"
+bucket = ""
+access_key = ""
+secret_key = ""
+
+[storage.webdav_server]
+enabled = false
+port = 0
+auth_realm = "FileHub Test"
+
+[license]
+enabled = false
+provider = "flexnet"
+license_file = ""
+feature_name = "test_feature"
+
+[license.pool]
+cache_ttl_seconds = 5
+refresh_interval_seconds = 60
+warning_threshold_percent = 80
+critical_threshold_percent = 95
+
+[worker]
+enabled = false
+concurrency = 1
+poll_interval_seconds = 60
+
+[realtime]
+max_connections_per_user = 2
+channel_buffer_size = 32
+ping_interval_seconds = 30
+ping_timeout_seconds = 10
+max_subscriptions_per_connection = 10
+
+[realtime.notifications]
+persist_for_offline = true
+max_stored_per_user = 100
+cleanup_after_days = 7
+batch_window_ms = 100
+
+[plugins]
+directory = "/tmp/filehub_test/plugins"
+auto_load = false
+
+[logging]
+level = "warn"
+format = "pretty"
+file = "/tmp/filehub_test/logs/test.log"
+access_log = "/tmp/filehub_test/logs/access.log"
+max_file_size_mb = 10
+max_files = 2

@@ -1,9 +1,42 @@
 [package]
 name = "filehub-service"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+description = "Business logic services for FileHub — orchestrates repositories, cache, storage, and auth"
 
 [dependencies]
+filehub-core = { path = "../filehub-core" }
+filehub-entity = { path = "../filehub-entity" }
+filehub-database = { path = "../filehub-database" }
+filehub-cache = { path = "../filehub-cache" }
+filehub-storage = { path = "../filehub-storage" }
+filehub-auth = { path = "../filehub-auth" }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Types
+uuid = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+
+# Errors
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Streaming
+tokio-util = { workspace = true }
+
+# Rand for share tokens
+rand = { workspace = true }
+
+# Image processing
+image = { workspace = true }

@@ -1,14 +1,19 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # filehub-entity
+//!
+//! Domain entity models for Suzuki FileHub. Every struct in this crate
+//! represents a database table row or a domain value object. All entities
+//! derive `Debug`, `Clone`, `Serialize`, `Deserialize`, and database
+//! entities additionally derive `sqlx::FromRow`.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod audit;
+pub mod file;
+pub mod folder;
+pub mod job;
+pub mod license;
+pub mod notification;
+pub mod permission;
+pub mod presence;
+pub mod session;
+pub mod share;
+pub mod storage;
+pub mod user;

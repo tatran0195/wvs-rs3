@@ -2,8 +2,20 @@
 name = "filehub-database"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+description = "Database connection management and repository implementations for FileHub"
 
 [dependencies]
+filehub-core.workspace = true
+filehub-entity.workspace = true
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

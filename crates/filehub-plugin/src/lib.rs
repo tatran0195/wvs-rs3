@@ -1,14 +1,23 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # filehub-plugin
+//!
+//! Plugin framework for Suzuki FileHub. Provides:
+//!
+//! - Plugin lifecycle management (load, init, start, stop, unload)
+//! - Hook registry with priority-ordered registration
+//! - Hook dispatcher with Continue/Halt semantics
+//! - Plugin API context exposing services to plugins
+//! - Optional dynamic loading via `libloading`
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod api;
+pub mod ffi;
+pub mod hooks;
+pub mod loader;
+pub mod manager;
+pub mod registry;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use api::context::PluginContext;
+pub use hooks::definitions::{HookAction, HookPayload, HookPoint, HookResult};
+pub use hooks::dispatcher::HookDispatcher;
+pub use hooks::registry::HookRegistry;
+pub use manager::PluginManager;
+pub use registry::PluginRegistry;

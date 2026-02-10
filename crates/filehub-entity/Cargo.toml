@@ -2,8 +2,15 @@
 name = "filehub-entity"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+description = "Domain entity models and enums for FileHub"
 
 [dependencies]
+filehub-core = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

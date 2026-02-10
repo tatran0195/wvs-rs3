@@ -1,9 +1,31 @@
 [package]
 name = "filehub-cli"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+description = "Command-line interface for FileHub administration and management"
+
+[[bin]]
+name = "filehub-cli"
+path = "src/main.rs"
 
 [dependencies]
+filehub-core = { path = "../filehub-core" }
+filehub-entity = { path = "../filehub-entity" }
+filehub-database = { path = "../filehub-database" }
+filehub-cache = { path = "../filehub-cache" }
+filehub-storage = { path = "../filehub-storage" }
+filehub-auth = { path = "../filehub-auth" }
+filehub-service = { path = "../filehub-service" }
+filehub-api = { path = "../filehub-api" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.12"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tabled = "0.20"

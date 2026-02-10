@@ -1,14 +1,13 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! WebDAV server implementation for FileHub (RFC 4918).
+//!
+//! Provides a standards-compliant WebDAV interface allowing clients
+//! like Windows Explorer, macOS Finder, Cyberduck, and others to
+//! access FileHub storage as a mounted drive.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod auth;
+pub mod handler;
+pub mod methods;
+pub mod properties;
+pub mod server;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use server::WebDavServer;

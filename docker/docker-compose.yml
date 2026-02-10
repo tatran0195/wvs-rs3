@@ -1,0 +1,134 @@
+version: "3.9"
+
+services:
+  # ── Application ───────────────────────────────────
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: filehub-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      FILEHUB_CONFIG: /opt/filehub/config/default.toml
+      FILEHUB_ENV: production
+      RUST_LOG: info
+      # Override database URL
+      FILEHUB_DATABASE__URL: "postgres://filehub:filehub_secret@postgres:5432/filehub"
+      # Override cache
+      FILEHUB_CACHE__PROVIDER: redis
+      FILEHUB_CACHE__REDIS__URL: "redis://redis:6379"
+      # Override auth secret
+      FILEHUB_AUTH__JWT_SECRET: "${JWT_SECRET:-change-me-in-production-use-a-long-random-string}"
+    volumes:
+      - filehub-data:/opt/filehub/data
+      - filehub-logs:/opt/filehub/data/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - filehub-network
+
+  # ── PostgreSQL ────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: filehub-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: filehub
+      POSTGRES_USER: filehub
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-filehub_secret}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filehub -d filehub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - filehub-network
+
+  # ── Redis ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: filehub-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - filehub-network
+
+  # ── Development Only ──────────────────────────────
+  app-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: filehub-dev
+    profiles:
+      - dev
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      FILEHUB_CONFIG: /app/config/default.toml
+      FILEHUB_ENV: development
+      RUST_LOG: debug
+      FILEHUB_DATABASE__URL: "postgres://filehub:filehub_secret@postgres:5432/filehub_dev"
+      FILEHUB_CACHE__PROVIDER: memory
+    volumes:
+      - ../src:/app/src
+      - ../crates:/app/crates
+      - ../config:/app/config
+      - ../migrations:/app/migrations
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - filehub-network
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  filehub-data:
+    driver: local
+  filehub-logs:
+    driver: local
+  cargo-cache:
+    driver: local
+  target-cache:
+    driver: local
+
+networks:
+  filehub-network:
+    driver: bridge

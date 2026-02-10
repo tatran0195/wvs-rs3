@@ -1,9 +1,23 @@
 [package]
 name = "filehub-core"
+description = "Core traits, configuration, types, events, and error handling for FileHub"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
-repository.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+config.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+futures.workspace = true
+tracing.workspace = true
+sqlx = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

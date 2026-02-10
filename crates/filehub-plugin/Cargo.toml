@@ -1,9 +1,35 @@
 [package]
 name = "filehub-plugin"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+description = "Plugin framework with hook registry, dispatcher, and dynamic loading for FileHub"
 
 [dependencies]
+filehub-core = { path = "../filehub-core" }
+filehub-entity = { path = "../filehub-entity" }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Types
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Errors
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Dynamic loading
+libloading = { workspace = true, optional = true }
+
+[features]
+default = []
+dynamic = ["libloading"]

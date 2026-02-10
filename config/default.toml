@@ -1,0 +1,132 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+workers = 0
+max_connections = 10000
+request_timeout_seconds = 30
+shutdown_grace_seconds = 30
+
+[server.tls]
+enabled = false
+cert_path = ""
+key_path = ""
+
+[server.cors]
+allowed_origins = ["*"]
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+allowed_headers = ["*"]
+max_age_seconds = 3600
+
+[database]
+url = "postgres://filehub:password@localhost:5432/filehub"
+max_connections = 20
+min_connections = 5
+connect_timeout_seconds = 10
+idle_timeout_seconds = 300
+
+[cache]
+provider = "memory"
+default_ttl_seconds = 300
+
+[cache.redis]
+url = "redis://localhost:6379"
+pool_size = 10
+key_prefix = "filehub:"
+
+[cache.memory]
+max_capacity = 10000
+time_to_live_seconds = 300
+
+[auth]
+jwt_secret = "CHANGE_ME_IN_PRODUCTION"
+jwt_access_ttl_minutes = 15
+jwt_refresh_ttl_hours = 24
+password_min_length = 8
+max_failed_attempts = 5
+lockout_duration_minutes = 30
+
+[session]
+idle_timeout_minutes = 30
+absolute_timeout_hours = 12
+heartbeat_interval_seconds = 30
+heartbeat_timeout_seconds = 90
+cleanup_interval_minutes = 15
+
+[session.limits]
+enabled = true
+overflow_strategy = "deny"
+
+[session.limits.by_role]
+admin = 1
+manager = 1
+creator = 1
+viewer = 0
+
+[session.admin_reservation]
+enabled = true
+reserved_seats = 1
+
+[storage]
+data_root = "./data"
+default_provider = "local"
+max_upload_size_bytes = 5368709120
+chunk_size_bytes = 5242880
+thumbnail_sizes = [64, 128, 256, 512]
+
+[storage.local]
+root_path = "./data/storage/local"
+
+[storage.s3]
+enabled = false
+endpoint = ""
+region = "us-east-1"
+bucket = ""
+access_key = ""
+secret_key = ""
+
+[storage.webdav_server]
+enabled = false
+port = 8081
+auth_realm = "FileHub WebDAV"
+
+[license]
+enabled = false
+provider = "flexnet"
+license_file = "data/plugins/flexnet/license.dat"
+feature_name = "suzuki_filehub"
+
+[license.pool]
+cache_ttl_seconds = 30
+refresh_interval_seconds = 15
+warning_threshold_percent = 80
+critical_threshold_percent = 95
+
+[worker]
+enabled = true
+concurrency = 4
+poll_interval_seconds = 5
+
+[realtime]
+max_connections_per_user = 5
+channel_buffer_size = 256
+ping_interval_seconds = 30
+ping_timeout_seconds = 10
+max_subscriptions_per_connection = 50
+
+[realtime.notifications]
+persist_for_offline = true
+max_stored_per_user = 1000
+cleanup_after_days = 30
+batch_window_ms = 500
+
+[plugins]
+directory = "./plugins"
+auto_load = true
+
+[logging]
+level = "info"
+format = "pretty"
+file = "data/logs/app.log"
+access_log = "data/logs/access.log"
+max_file_size_mb = 100
+max_files = 10

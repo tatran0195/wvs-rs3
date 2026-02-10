@@ -1,9 +1,45 @@
 [package]
 name = "filehub-auth"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+description = "Authentication, JWT, RBAC, ACL, session management, and seat allocation for FileHub"
 
 [dependencies]
+filehub-core = { path = "../filehub-core" }
+filehub-entity = { path = "../filehub-entity" }
+filehub-database = { path = "../filehub-database" }
+filehub-cache = { path = "../filehub-cache" }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Types
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Errors
+thiserror = { workspace = true }
+
+# Auth
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+rand = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Cache (for Redis Lua scripts)
+redis = { workspace = true, optional = true }
+
+# Password strength
+zxcvbn = { workspace = true }
+
+[features]
+default = ["redis-seat"]
+redis-seat = ["redis"]

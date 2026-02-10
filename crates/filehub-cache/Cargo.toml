@@ -2,8 +2,29 @@
 name = "filehub-cache"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+description = "Cache providers (Redis and in-memory) for FileHub"
+
+[features]
+default = ["memory", "redis-backend"]
+memory = ["dep:moka", "dep:dashmap"]
+redis-backend = ["dep:redis"]
 
 [dependencies]
+filehub-core.workspace = true
+filehub-entity.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+moka = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
+dashmap = { version = "5", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+dashmap = "5"

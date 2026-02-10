@@ -1,14 +1,18 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # filehub-api
+//!
+//! HTTP API layer for Suzuki FileHub built on Axum.
+//!
+//! Provides all REST endpoints, WebSocket upgrade, middleware (auth, RBAC,
+//! rate limiting, CORS, logging), extractors, DTOs, and error mapping.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod app;
+pub mod dto;
+pub mod error;
+pub mod extractors;
+pub mod handlers;
+pub mod middleware;
+pub mod router;
+pub mod state;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use app::build_app;
+pub use state::AppState;

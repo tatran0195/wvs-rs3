@@ -1,14 +1,17 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! # filehub-core
+//!
+//! Core crate for Suzuki FileHub. Contains traits, configuration schemas,
+//! typed identifiers, domain events, pagination/sorting/filter types,
+//! and the unified error system.
+//!
+//! This crate has **no** internal dependencies on other FileHub crates.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod config;
+pub mod error;
+pub mod events;
+pub mod result;
+pub mod traits;
+pub mod types;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use error::AppError;
+pub use result::AppResult;

@@ -1,0 +1,53 @@
+[server]
+port = 8080
+workers = 0
+max_connections = 50000
+
+[server.tls]
+enabled = true
+cert_path = "/etc/ssl/certs/filehub.pem"
+key_path = "/etc/ssl/private/filehub.key"
+
+[server.cors]
+allowed_origins = ["https://filehub.example.com"]
+
+[database]
+url = "postgres://filehub:CHANGE_ME@db:5432/filehub"
+max_connections = 50
+min_connections = 10
+
+[cache]
+provider = "redis"
+
+[cache.redis]
+url = "redis://redis:6379"
+pool_size = 20
+
+[auth]
+jwt_secret = "CHANGE_ME_USE_A_LONG_RANDOM_SECRET"
+jwt_access_ttl_minutes = 15
+max_failed_attempts = 5
+lockout_duration_minutes = 30
+
+[session]
+idle_timeout_minutes = 30
+absolute_timeout_hours = 12
+
+[session.limits]
+enabled = true
+overflow_strategy = "deny"
+
+[license]
+enabled = true
+license_file = "/opt/filehub/license.dat"
+feature_name = "suzuki_filehub"
+
+[worker]
+enabled = true
+concurrency = 8
+
+[logging]
+level = "info"
+format = "json"
+file = "/var/log/filehub/app.log"
+access_log = "/var/log/filehub/access.log"

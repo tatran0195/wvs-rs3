@@ -1,14 +1,16 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Background job processing and scheduled tasks for FileHub.
+//!
+//! This crate provides:
+//! - A worker runner that polls for and executes queued jobs
+//! - A cron scheduler for periodic maintenance tasks
+//! - A job executor that dispatches jobs to the correct handler
+//! - Built-in job implementations for cleanup, reports, and maintenance
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod executor;
+pub mod jobs;
+pub mod queue;
+pub mod runner;
+pub mod scheduler;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use runner::WorkerRunner;
+pub use scheduler::CronScheduler;
