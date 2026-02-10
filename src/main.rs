@@ -193,29 +193,32 @@ async fn run(config: AppConfig) -> Result<(), AppError> {
     let license_manager = if config.license.enabled {
         tracing::info!("Loading FlexNet license plugin...");
 
-        #[cfg(feature = "mock")]
-        let bindings: Arc<dyn plugin_flexnet::ffi::bindings::FlexNetBindings> = {
-            let mock = plugin_flexnet::ffi::bindings::mock::MockFlexNetBindings::new();
-            mock.set_total_seats(&config.license.feature_name, 10);
-            Arc::new(mock)
+        let dll_path = if config.license.license_file.is_empty() {
+            None
+        } else {
+            // The DLL path is typically alongside the license file or in a known location
+            Some(std::path::PathBuf::from("license_proxy.dll"))
         };
-
-        #[cfg(not(feature = "mock"))]
-        let bindings: Arc<dyn plugin_flexnet::ffi::bindings::FlexNetBindings> =
-            { Arc::new(plugin_flexnet::ffi::bindings::mock::MockFlexNetBindings::new()) };
 
         let mut flexnet_plugin = plugin_flexnet::FlexNetPlugin::new();
         let manager = flexnet_plugin
             .initialize(
                 config.license.clone(),
-                bindings,
+                dll_path,
                 Arc::clone(&license_repo),
                 Arc::clone(&snapshot_repo),
             )
             .await?;
 
         flexnet_plugin.register_hooks(&mut hook_registry)?;
-        tracing::info!("FlexNet plugin loaded");
+
+        tracing::info!(
+            "FlexNet plugin loaded: server='{}', star={}, mock={}",
+            manager.server_info(),
+            manager.is_star_license(),
+            manager.is_mock()
+        );
+
         Some(manager)
     } else {
         tracing::info!("License system disabled");

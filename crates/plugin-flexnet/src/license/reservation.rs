@@ -12,7 +12,10 @@ pub struct ReservationConfig {
     pub reserved_seats: i32,
 }
 
-/// Manages admin seat reservations
+/// Manages admin seat reservations.
+///
+/// When enabled, a number of seats are reserved exclusively for admin users.
+/// Non-admin users cannot checkout if only reserved seats remain.
 #[derive(Debug, Clone)]
 pub struct ReservationManager {
     /// Reservation configuration
@@ -39,7 +42,9 @@ impl ReservationManager {
         }
     }
 
-    /// Calculate the effective available seats for non-admin users
+    /// Calculate effective available seats for non-admin users.
+    ///
+    /// Subtracts reserved seats from the total available.
     pub fn effective_available(&self, total_available: i32) -> i32 {
         if self.config.enabled {
             (total_available - self.config.reserved_seats).max(0)
@@ -48,7 +53,7 @@ impl ReservationManager {
         }
     }
 
-    /// Calculate the effective available seats for admin users (no restriction)
+    /// Calculate effective available seats for admin users (no restriction)
     pub fn effective_available_for_admin(&self, total_available: i32) -> i32 {
         total_available
     }

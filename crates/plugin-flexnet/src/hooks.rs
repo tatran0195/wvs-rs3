@@ -1,22 +1,33 @@
 //! Hook implementations for the FlexNet plugin.
 //!
-//! Implements all lifecycle hooks that integrate license management
-//! with the FileHub session system.
+//! Integrates license checkout/checkin with the FileHub session lifecycle:
+//!
+//! - `after_login` → checkout license for the new session
+//! - `before_logout` → checkin license before session destruction
+//! - `after_session_terminate` → checkin license after admin termination
+//! - `on_session_expired` → checkin license when session expires
+//! - `on_session_idle` → optionally release license under pool pressure
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::Value;
 use tracing;
 
 use filehub_core::error::AppError;
 use filehub_core::types::id::{SessionId, UserId};
-use filehub_plugin::hooks::definitions::{HookAction, HookContext, HookPayload, HookResult};
+use filehub_plugin::hooks::definitions::{
+    HookAction, HookContext, HookHandler, HookPayload, HookResult,
+};
 
-use crate::license::checkin::CheckinReason;
 use crate::license::manager::LicenseManager;
 
-/// Hook handler for after_login: checkout a license
+/// Hook: `after_login` — checkout a license for the newly created session.
+///
+/// Flow: `login → create session → checkout(feature, session_id)`
+///
+/// If checkout fails (no seats), returns `HookAction::Halt` which
+/// causes the login to fail and the session to be rolled back.
+#[derive(Debug)]
 pub struct AfterLoginHook {
     /// License manager
     manager: Arc<LicenseManager>,
@@ -30,7 +41,7 @@ impl AfterLoginHook {
 }
 
 #[async_trait]
-impl filehub_plugin::hooks::definitions::HookHandler for AfterLoginHook {
+impl HookHandler for AfterLoginHook {
     fn name(&self) -> &str {
         "flexnet_after_login"
     }
@@ -39,18 +50,18 @@ impl filehub_plugin::hooks::definitions::HookHandler for AfterLoginHook {
         100
     }
 
-    async fn execute(&self, ctx: &HookContext, payload: &HookPayload) -> HookResult {
+    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
         let user_id = ctx
             .user_id
-            .ok_or_else(|| AppError::internal("after_login hook: user_id not set in context"))?;
+            .ok_or_else(|| AppError::internal("after_login: user_id missing from context"))?;
         let session_id = ctx
             .session_id
-            .ok_or_else(|| AppError::internal("after_login hook: session_id not set in context"))?;
+            .ok_or_else(|| AppError::internal("after_login: session_id missing from context"))?;
 
         let ip_address = ctx.ip_address.clone();
 
         tracing::info!(
-            "FlexNet after_login: checking out license for user={}, session={}",
+            "FlexNet after_login: checkout for user={}, session={}",
             user_id,
             session_id
         );
@@ -65,24 +76,29 @@ impl filehub_plugin::hooks::definitions::HookHandler for AfterLoginHook {
             .await
         {
             Ok(checkout) => {
-                tracing::info!(
-                    "License checked out successfully: token='{}'",
-                    checkout.checkout_token
-                );
+                tracing::info!("License checkout successful: session='{}'", session_id);
                 Ok(HookAction::Continue(Some(serde_json::json!({
-                    "checkout_token": checkout.checkout_token,
+                    "license_checkout_id": checkout.id.to_string(),
                     "feature": checkout.feature_name,
+                    "is_star": self.manager.is_star_license(),
                 }))))
             }
             Err(e) => {
-                tracing::error!("License checkout failed: {}", e);
-                Ok(HookAction::Halt(format!("License checkout failed: {}", e)))
+                tracing::error!("License checkout FAILED: {}", e);
+                // Halt the login — session will be rolled back
+                Ok(HookAction::Halt(format!(
+                    "No license seats available: {}",
+                    e
+                )))
             }
         }
     }
 }
 
-/// Hook handler for before_logout: prepare checkin
+/// Hook: `before_logout` — checkin the license before session destruction.
+///
+/// Flow: `checkin(feature, session_id) → destroy session`
+#[derive(Debug)]
 pub struct BeforeLogoutHook {
     /// License manager
     manager: Arc<LicenseManager>,
@@ -96,7 +112,7 @@ impl BeforeLogoutHook {
 }
 
 #[async_trait]
-impl filehub_plugin::hooks::definitions::HookHandler for BeforeLogoutHook {
+impl HookHandler for BeforeLogoutHook {
     fn name(&self) -> &str {
         "flexnet_before_logout"
     }
@@ -106,22 +122,20 @@ impl filehub_plugin::hooks::definitions::HookHandler for BeforeLogoutHook {
     }
 
     async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let session_id = ctx.session_id.ok_or_else(|| {
-            AppError::internal("before_logout hook: session_id not set in context")
-        })?;
+        let session_id = ctx
+            .session_id
+            .ok_or_else(|| AppError::internal("before_logout: session_id missing from context"))?;
 
-        tracing::info!(
-            "FlexNet before_logout: preparing checkin for session={}",
-            session_id
-        );
+        tracing::info!("FlexNet before_logout: checkin for session={}", session_id);
 
         if let Err(e) = self
             .manager
             .checkin_by_session(SessionId::from(session_id))
             .await
         {
+            // Checkin failures are non-fatal for logout
             tracing::error!(
-                "Failed to checkin license during logout for session={}: {}",
+                "License checkin failed during logout (session={}): {}",
                 session_id,
                 e
             );
@@ -131,21 +145,22 @@ impl filehub_plugin::hooks::definitions::HookHandler for BeforeLogoutHook {
     }
 }
 
-/// Hook handler for after_session_terminate: checkin license
+/// Hook: `after_session_terminate` — checkin license after admin kills a session.
+#[derive(Debug)]
 pub struct AfterSessionTerminateHook {
     /// License manager
     manager: Arc<LicenseManager>,
 }
 
 impl AfterSessionTerminateHook {
-    /// Create a new after_session_terminate hook handler
+    /// Create a new hook handler
     pub fn new(manager: Arc<LicenseManager>) -> Self {
         Self { manager }
     }
 }
 
 #[async_trait]
-impl filehub_plugin::hooks::definitions::HookHandler for AfterSessionTerminateHook {
+impl HookHandler for AfterSessionTerminateHook {
     fn name(&self) -> &str {
         "flexnet_after_session_terminate"
     }
@@ -155,12 +170,12 @@ impl filehub_plugin::hooks::definitions::HookHandler for AfterSessionTerminateHo
     }
 
     async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let session_id = ctx.session_id.ok_or_else(|| {
-            AppError::internal("after_session_terminate hook: session_id not set")
-        })?;
+        let session_id = ctx
+            .session_id
+            .ok_or_else(|| AppError::internal("after_session_terminate: session_id missing"))?;
 
         tracing::info!(
-            "FlexNet after_session_terminate: checking in license for session={}",
+            "FlexNet after_session_terminate: checkin for session={}",
             session_id
         );
 
@@ -170,7 +185,7 @@ impl filehub_plugin::hooks::definitions::HookHandler for AfterSessionTerminateHo
             .await
         {
             tracing::error!(
-                "Failed to checkin license after session termination for session={}: {}",
+                "License checkin failed after session termination (session={}): {}",
                 session_id,
                 e
             );
@@ -180,16 +195,70 @@ impl filehub_plugin::hooks::definitions::HookHandler for AfterSessionTerminateHo
     }
 }
 
-/// Hook handler for on_session_idle: consider releasing license
+/// Hook: `on_session_expired` — checkin license when session naturally expires.
+#[derive(Debug)]
+pub struct OnSessionExpiredHook {
+    /// License manager
+    manager: Arc<LicenseManager>,
+}
+
+impl OnSessionExpiredHook {
+    /// Create a new hook handler
+    pub fn new(manager: Arc<LicenseManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl HookHandler for OnSessionExpiredHook {
+    fn name(&self) -> &str {
+        "flexnet_on_session_expired"
+    }
+
+    fn priority(&self) -> i32 {
+        100
+    }
+
+    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
+        let session_id = ctx
+            .session_id
+            .ok_or_else(|| AppError::internal("on_session_expired: session_id missing"))?;
+
+        tracing::info!(
+            "FlexNet on_session_expired: checkin for session={}",
+            session_id
+        );
+
+        if let Err(e) = self
+            .manager
+            .checkin_by_session(SessionId::from(session_id))
+            .await
+        {
+            tracing::error!(
+                "License checkin failed on session expiry (session={}): {}",
+                session_id,
+                e
+            );
+        }
+
+        Ok(HookAction::Continue(None))
+    }
+}
+
+/// Hook: `on_session_idle` — consider releasing license under pool pressure.
+///
+/// Only releases if pool utilization exceeds the critical threshold.
+/// Star licenses never release on idle.
+#[derive(Debug)]
 pub struct OnSessionIdleHook {
     /// License manager
     manager: Arc<LicenseManager>,
-    /// Whether to release licenses on idle
+    /// Whether idle release is enabled
     release_on_idle: bool,
 }
 
 impl OnSessionIdleHook {
-    /// Create a new on_session_idle hook handler
+    /// Create a new hook handler
     pub fn new(manager: Arc<LicenseManager>, release_on_idle: bool) -> Self {
         Self {
             manager,
@@ -199,7 +268,7 @@ impl OnSessionIdleHook {
 }
 
 #[async_trait]
-impl filehub_plugin::hooks::definitions::HookHandler for OnSessionIdleHook {
+impl HookHandler for OnSessionIdleHook {
     fn name(&self) -> &str {
         "flexnet_on_session_idle"
     }
@@ -213,16 +282,18 @@ impl filehub_plugin::hooks::definitions::HookHandler for OnSessionIdleHook {
             return Ok(HookAction::Continue(None));
         }
 
+        // Star licenses have unlimited seats — no need to release on idle
+        if self.manager.is_star_license() {
+            return Ok(HookAction::Continue(None));
+        }
+
         let session_id = ctx
             .session_id
-            .ok_or_else(|| AppError::internal("on_session_idle hook: session_id not set"))?;
-
-        tracing::info!(
-            "FlexNet on_session_idle: considering license release for session={}",
-            session_id
-        );
+            .ok_or_else(|| AppError::internal("on_session_idle: session_id missing"))?;
 
         let pool_status = self.manager.pool_status().await?;
+
+        // Only release if above critical threshold
         let utilization = if pool_status.total_seats > 0 {
             (pool_status.checked_out as f64 / pool_status.total_seats as f64) * 100.0
         } else {
@@ -231,9 +302,10 @@ impl filehub_plugin::hooks::definitions::HookHandler for OnSessionIdleHook {
 
         if utilization >= pool_status.critical_threshold as f64 {
             tracing::info!(
-                "Pool utilization at {:.1}% (critical threshold: {}%), releasing idle license",
+                "Pool at {:.1}% utilization (critical: {}%), releasing idle session={}",
                 utilization,
-                pool_status.critical_threshold
+                pool_status.critical_threshold,
+                session_id
             );
 
             if let Err(e) = self
@@ -242,60 +314,11 @@ impl filehub_plugin::hooks::definitions::HookHandler for OnSessionIdleHook {
                 .await
             {
                 tracing::error!(
-                    "Failed to release idle license for session={}: {}",
+                    "Failed to release idle license (session={}): {}",
                     session_id,
                     e
                 );
             }
-        }
-
-        Ok(HookAction::Continue(None))
-    }
-}
-
-/// Hook handler for on_session_expired: checkin license
-pub struct OnSessionExpiredHook {
-    /// License manager
-    manager: Arc<LicenseManager>,
-}
-
-impl OnSessionExpiredHook {
-    /// Create a new on_session_expired hook handler
-    pub fn new(manager: Arc<LicenseManager>) -> Self {
-        Self { manager }
-    }
-}
-
-#[async_trait]
-impl filehub_plugin::hooks::definitions::HookHandler for OnSessionExpiredHook {
-    fn name(&self) -> &str {
-        "flexnet_on_session_expired"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
-
-    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let session_id = ctx
-            .session_id
-            .ok_or_else(|| AppError::internal("on_session_expired hook: session_id not set"))?;
-
-        tracing::info!(
-            "FlexNet on_session_expired: checking in license for session={}",
-            session_id
-        );
-
-        if let Err(e) = self
-            .manager
-            .checkin_by_session(SessionId::from(session_id))
-            .await
-        {
-            tracing::error!(
-                "Failed to checkin license on session expiry for session={}: {}",
-                session_id,
-                e
-            );
         }
 
         Ok(HookAction::Continue(None))

@@ -17,11 +17,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
-thiserror = "1"
-tracing = "0.1"
-libloading = "0.8"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+libloading = "0.9"
+anyhow = "1"
 
 [features]
 default = ["mock"]
 mock = []
-ffi = []

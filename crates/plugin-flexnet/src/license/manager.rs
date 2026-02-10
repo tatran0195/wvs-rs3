@@ -1,4 +1,7 @@
 //! LicenseManager orchestrates all license operations.
+//!
+//! Central coordinator that wraps the FFI wrapper and integrates
+//! with the database for checkout tracking and pool snapshots.
 
 use std::sync::Arc;
 
@@ -16,24 +19,26 @@ use filehub_database::repositories::pool_snapshot::PoolSnapshotRepository;
 use filehub_entity::license::model::LicenseCheckout;
 use filehub_entity::license::pool::{PoolSnapshot, PoolStatus};
 
-use crate::ffi::wrapper::FlexNetWrapper;
+use crate::ffi::wrapper::LicenseManagerWrapper;
 
-/// Manages all FlexNet license operations
+/// Manages all FlexNet license operations.
+///
+/// Thread-safe — can be shared across handlers via `Arc<LicenseManager>`.
 #[derive(Debug)]
 pub struct LicenseManager {
-    /// FlexNet wrapper for FFI calls
-    wrapper: Arc<FlexNetWrapper>,
+    /// FFI wrapper (real or mock)
+    wrapper: Arc<LicenseManagerWrapper>,
     /// License configuration
     config: LicenseConfig,
-    /// License checkout repository
+    /// License checkout repository for DB tracking
     checkout_repo: Arc<LicenseCheckoutRepository>,
     /// Pool snapshot repository
     snapshot_repo: Arc<PoolSnapshotRepository>,
-    /// Cached pool status
+    /// Cached pool status with TTL
     cached_status: Arc<RwLock<Option<CachedPoolStatus>>>,
 }
 
-/// Cached pool status with TTL
+/// Cached pool status with expiry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedPoolStatus {
     /// The pool status
@@ -45,7 +50,7 @@ struct CachedPoolStatus {
 impl LicenseManager {
     /// Create a new LicenseManager
     pub fn new(
-        wrapper: Arc<FlexNetWrapper>,
+        wrapper: Arc<LicenseManagerWrapper>,
         config: LicenseConfig,
         checkout_repo: Arc<LicenseCheckoutRepository>,
         snapshot_repo: Arc<PoolSnapshotRepository>,
@@ -59,35 +64,56 @@ impl LicenseManager {
         }
     }
 
-    /// Initialize the license system
+    /// Initialize the license system.
+    ///
+    /// Loads the DLL (or mock), initializes the context, and syncs pool status.
     pub async fn initialize(&self) -> Result<(), AppError> {
         tracing::info!("Initializing license manager");
-        self.wrapper
-            .initialize(&self.config.license_file)
-            .map_err(|e| AppError::internal(format!("Failed to initialize FlexNet: {}", e)))?;
 
+        let override_path = if self.config.license_file.is_empty() {
+            None
+        } else {
+            Some(self.config.license_file.as_str())
+        };
+
+        self.wrapper.initialize(override_path).map_err(|e| {
+            AppError::internal(format!("Failed to initialize license manager: {}", e))
+        })?;
+
+        let server_info = self.wrapper.get_server_info();
+        let is_star = self.wrapper.is_star_license();
+        tracing::info!(
+            "License manager initialized: server='{}', star_license={}",
+            server_info,
+            is_star
+        );
+
+        // Initial pool sync
         self.sync_pool_status().await?;
-        tracing::info!("License manager initialized successfully");
+
+        tracing::info!("License manager ready");
         Ok(())
     }
 
-    /// Shutdown the license system, checking in all active licenses
+    /// Shutdown the license system.
+    ///
+    /// Releases all checkouts via the DLL and updates DB records.
     pub async fn shutdown(&self) -> Result<(), AppError> {
         tracing::info!("Shutting down license manager");
 
+        // Mark all active DB checkouts as checked in
         let active_checkouts =
             self.checkout_repo.find_active().await.map_err(|e| {
                 AppError::internal(format!("Failed to find active checkouts: {}", e))
             })?;
 
+        let count = active_checkouts.len();
+
+        // Release all via DLL in one call
+        self.wrapper.release_all();
+
+        // Update DB records
         for checkout in &active_checkouts {
-            if let Err(e) = self.wrapper.checkin(&checkout.checkout_token) {
-                tracing::error!(
-                    "Failed to checkin token '{}' during shutdown: {}",
-                    checkout.checkout_token,
-                    e
-                );
-            }
             if let Err(e) = self.checkout_repo.checkin(checkout.id).await {
                 tracing::error!(
                     "Failed to update checkout record {} during shutdown: {}",
@@ -97,19 +123,14 @@ impl LicenseManager {
             }
         }
 
-        tracing::info!(
-            "Checked in {} licenses during shutdown",
-            active_checkouts.len()
-        );
-
-        self.wrapper
-            .shutdown()
-            .map_err(|e| AppError::internal(format!("Failed to shutdown FlexNet: {}", e)))?;
-
+        tracing::info!("License manager shutdown: released {} checkouts", count);
         Ok(())
     }
 
-    /// Checkout a license for a session
+    /// Checkout a license for a session.
+    ///
+    /// Called after session creation during the login flow:
+    /// `login → create session → checkout(feature, session_id)`
     pub async fn checkout(
         &self,
         user_id: UserId,
@@ -117,85 +138,110 @@ impl LicenseManager {
         ip_address: Option<String>,
     ) -> Result<LicenseCheckout, AppError> {
         let feature = &self.config.feature_name;
-        let version = "1.0";
+        let session_id_str = session_id.to_string();
 
         tracing::debug!(
-            "Checking out license for user={}, session={}, feature='{}'",
+            "Checking out license: feature='{}', user={}, session={}",
+            feature,
             user_id,
-            session_id,
-            feature
+            session_id_str
         );
 
-        let result = self.wrapper.checkout(feature, version).map_err(|e| {
-            AppError::service_unavailable(format!("License checkout failed: {}", e))
-        })?;
+        // Call DLL checkout
+        self.wrapper
+            .checkout(feature, &session_id_str)
+            .map_err(|e| {
+                AppError::service_unavailable(format!("License checkout failed: {}", e))
+            })?;
 
+        // Record in database
         let checkout = LicenseCheckout {
-            id: uuid::Uuid::new_v4(),
+            id: Uuid::new_v4(),
             session_id: Some(*session_id),
             user_id: *user_id,
             feature_name: feature.clone(),
-            checkout_token: result.token,
-            checked_out_at: result.checked_out_at,
+            checkout_token: session_id_str.clone(),
+            checked_out_at: Utc::now(),
             checked_in_at: None,
             ip_address,
             is_active: true,
         };
 
-        self.checkout_repo
-            .create(&checkout)
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to save checkout record: {}", e)))?;
+        self.checkout_repo.create(&checkout).await.map_err(|e| {
+            // Rollback: checkin the DLL checkout if DB write fails
+            tracing::error!(
+                "DB checkout record failed, rolling back DLL checkout: {}",
+                e
+            );
+            if let Err(rollback_err) = self.wrapper.checkin(feature, &session_id_str) {
+                tracing::error!("Rollback checkin also failed: {}", rollback_err);
+            }
+            AppError::internal(format!("Failed to save checkout record: {}", e))
+        })?;
 
         self.invalidate_cache().await;
 
         tracing::info!(
-            "License checked out: user={}, session={}, token='{}'",
-            user_id,
-            session_id,
-            checkout.checkout_token
+            "License checked out: feature='{}', session='{}', user={}",
+            feature,
+            session_id_str,
+            user_id
         );
 
         Ok(checkout)
     }
 
-    /// Checkin a license for a session
+    /// Checkin (release) a license for a session.
+    ///
+    /// Called during logout: `checkin(feature, session_id) → destroy session`
     pub async fn checkin_by_session(&self, session_id: SessionId) -> Result<(), AppError> {
-        let checkouts = self
+        let feature = &self.config.feature_name;
+        let session_id_str = session_id.to_string();
+
+        tracing::debug!(
+            "Checking in license: feature='{}', session='{}'",
+            feature,
+            session_id_str
+        );
+
+        // Call DLL checkin
+        if let Err(e) = self.wrapper.checkin(feature, &session_id_str) {
+            tracing::warn!(
+                "DLL checkin warning for session '{}': {} — continuing with DB cleanup",
+                session_id_str,
+                e
+            );
+        }
+
+        // Update DB: mark checkout as checked in
+        let active_checkouts = self
             .checkout_repo
             .find_active_by_session(*session_id)
             .await
-            .map_err(|e| {
-                AppError::internal(format!("Failed to find checkouts for session: {}", e))
-            })?;
+            .map_err(|e| AppError::internal(format!("Failed to find session checkouts: {}", e)))?;
 
-        for checkout in &checkouts {
-            self.checkin_single(checkout).await?;
+        for checkout in &active_checkouts {
+            if let Err(e) = self.checkout_repo.checkin(checkout.id).await {
+                tracing::error!("Failed to update checkout record {}: {}", checkout.id, e);
+            }
         }
 
-        if !checkouts.is_empty() {
+        if !active_checkouts.is_empty() {
             self.invalidate_cache().await;
         }
 
+        tracing::info!(
+            "License checked in: feature='{}', session='{}'",
+            feature,
+            session_id_str
+        );
+
         Ok(())
     }
 
-    /// Checkin a license by its token
-    pub async fn checkin_by_token(&self, token: &str) -> Result<(), AppError> {
-        self.wrapper
-            .checkin(token)
-            .map_err(|e| AppError::internal(format!("License checkin failed: {}", e)))?;
-
-        self.checkout_repo
-            .checkin_by_token(token)
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to update checkout record: {}", e)))?;
-
-        self.invalidate_cache().await;
-        Ok(())
-    }
-
-    /// Get the current pool status
+    /// Get the current pool status.
+    ///
+    /// Returns cached status if within TTL, otherwise queries the DLL.
     pub async fn pool_status(&self) -> Result<PoolStatus, AppError> {
         let cache_ttl = std::time::Duration::from_secs(self.config.pool.cache_ttl_seconds);
 
@@ -212,16 +258,23 @@ impl LicenseManager {
         self.sync_pool_status().await
     }
 
-    /// Force sync pool status from FlexNet
+    /// Force sync pool status from the DLL.
     pub async fn sync_pool_status(&self) -> Result<PoolStatus, AppError> {
         let feature = &self.config.feature_name;
 
-        let ffi_status = self
+        let (total_seats, used_seats) = self
             .wrapper
-            .pool_status(feature)
-            .map_err(|e| AppError::internal(format!("Failed to get pool status: {}", e)))?;
+            .get_token_pool(feature)
+            .map_err(|e| AppError::internal(format!("Failed to get token pool: {}", e)))?;
 
-        let active_sessions =
+        let is_star = self.wrapper.is_star_license();
+        let available = if is_star {
+            i32::MAX
+        } else {
+            total_seats - used_seats
+        };
+
+        let active_db_sessions =
             self.checkout_repo.count_active().await.map_err(|e| {
                 AppError::internal(format!("Failed to count active checkouts: {}", e))
             })?;
@@ -232,28 +285,29 @@ impl LicenseManager {
             0
         };
 
-        let drift_detected = (ffi_status.checked_out_seats - active_sessions as i32).abs() > 0;
+        let drift_detected = !is_star && (used_seats - active_db_sessions as i32).abs() > 0;
         let drift_detail = if drift_detected {
             Some(serde_json::json!({
-                "flexnet_checked_out": ffi_status.checked_out_seats,
-                "db_active_sessions": active_sessions,
-                "difference": ffi_status.checked_out_seats - active_sessions as i32,
+                "dll_used": used_seats,
+                "db_active": active_db_sessions,
+                "difference": used_seats - active_db_sessions as i32,
             }))
         } else {
             None
         };
 
         let status = PoolStatus {
-            total_seats: ffi_status.total_seats,
-            checked_out: ffi_status.checked_out_seats,
-            available: ffi_status.available_seats,
+            total_seats: if is_star { -1 } else { total_seats },
+            checked_out: used_seats,
+            available,
             admin_reserved,
-            active_sessions: active_sessions as i32,
+            active_sessions: active_db_sessions as i32,
             warning_threshold: self.config.pool.warning_threshold_percent,
             critical_threshold: self.config.pool.critical_threshold_percent,
             drift_detected,
         };
 
+        // Save snapshot
         let snapshot = PoolSnapshot {
             id: Uuid::new_v4(),
             total_seats: status.total_seats,
@@ -271,6 +325,7 @@ impl LicenseManager {
             tracing::warn!("Failed to save pool snapshot: {}", e);
         }
 
+        // Update cache
         {
             let mut cached = self.cached_status.write().await;
             *cached = Some(CachedPoolStatus {
@@ -282,55 +337,78 @@ impl LicenseManager {
         Ok(status)
     }
 
-    /// Reconcile pool status — fix drift between FlexNet and database
+    /// Reconcile pool state — fix drift between DLL and database.
+    ///
+    /// Finds DB checkouts that don't correspond to DLL state and cleans them up.
     pub async fn reconcile(&self) -> Result<PoolStatus, AppError> {
         tracing::info!("Starting pool reconciliation");
 
+        let feature = &self.config.feature_name;
+
+        // Get DLL state
+        let (total, used) = self
+            .wrapper
+            .get_token_pool(feature)
+            .map_err(|e| AppError::internal(format!("Failed to get DLL pool state: {}", e)))?;
+
+        // Get DB state
         let active_checkouts =
             self.checkout_repo.find_active().await.map_err(|e| {
                 AppError::internal(format!("Failed to find active checkouts: {}", e))
             })?;
 
-        let feature = &self.config.feature_name;
-        let ffi_available = self
-            .wrapper
-            .pool_status(feature)
-            .map_err(|e| AppError::internal(format!("Failed to get FFI pool status: {}", e)))?;
+        let db_count = active_checkouts.len() as i32;
+        let drift = used - db_count;
 
-        let mut orphan_count = 0;
-        for checkout in &active_checkouts {
-            if self.wrapper.checkin(&checkout.checkout_token).is_err() {
-                tracing::warn!(
-                    "Orphaned checkout detected: token='{}', marking as checked in",
-                    checkout.checkout_token
+        if drift != 0 {
+            tracing::warn!(
+                "Pool drift detected: DLL reports {} used, DB has {} active (drift: {})",
+                used,
+                db_count,
+                drift
+            );
+
+            if drift < 0 {
+                // DB has more checkouts than DLL — orphaned DB records
+                // These sessions may have been released by the DLL without DB update
+                tracing::info!(
+                    "Found {} orphaned DB checkout records, cleaning up",
+                    drift.abs()
                 );
-                if let Err(e) = self.checkout_repo.checkin(checkout.id).await {
-                    tracing::error!("Failed to mark orphaned checkout: {}", e);
-                }
-                orphan_count += 1;
-            } else {
-                let re_checkout = self.wrapper.checkout(feature, "1.0");
-                match re_checkout {
-                    Ok(result) => {
-                        if let Err(e) = self
-                            .checkout_repo
-                            .update_token(checkout.id, &result.token)
-                            .await
-                        {
-                            tracing::error!("Failed to update token during reconciliation: {}", e);
+
+                // We can't easily tell which DB records are orphaned without
+                // querying the DLL per-session, so we re-checkout all DB sessions
+                // to ensure consistency
+                for checkout in &active_checkouts {
+                    let session_id_str = checkout
+                        .session_id
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| checkout.checkout_token.clone());
+
+                    if self.wrapper.checkout(feature, &session_id_str).is_err() {
+                        tracing::warn!(
+                            "Reconciliation: checkout for session '{}' failed, marking as checked in",
+                            session_id_str
+                        );
+                        if let Err(e) = self.checkout_repo.checkin(checkout.id).await {
+                            tracing::error!(
+                                "Failed to mark orphaned checkout {}: {}",
+                                checkout.id,
+                                e
+                            );
                         }
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to re-checkout during reconciliation: {}", e);
                     }
                 }
             }
+        } else {
+            tracing::info!(
+                "Pool reconciliation: no drift detected (DLL={}, DB={})",
+                used,
+                db_count
+            );
         }
 
-        if orphan_count > 0 {
-            tracing::warn!("Reconciliation found {} orphaned checkouts", orphan_count);
-        }
-
+        // Force fresh sync
         let status = self.sync_pool_status().await?;
         tracing::info!("Pool reconciliation completed: {:?}", status);
         Ok(status)
@@ -344,9 +422,19 @@ impl LicenseManager {
             .map_err(|e| AppError::internal(format!("Failed to get pool history: {}", e)))
     }
 
-    /// Check if the wrapper is initialized
-    pub fn is_initialized(&self) -> bool {
-        self.wrapper.is_initialized()
+    /// Check if the license manager is using mock implementation
+    pub fn is_mock(&self) -> bool {
+        self.wrapper.is_mock()
+    }
+
+    /// Check if this is a star (unlimited) license
+    pub fn is_star_license(&self) -> bool {
+        self.wrapper.is_star_license()
+    }
+
+    /// Get the license server info string
+    pub fn server_info(&self) -> String {
+        self.wrapper.get_server_info()
     }
 
     /// Get the feature name from config
@@ -354,28 +442,9 @@ impl LicenseManager {
         &self.config.feature_name
     }
 
-    /// Internal: checkin a single checkout record
-    async fn checkin_single(&self, checkout: &LicenseCheckout) -> Result<(), AppError> {
-        if let Err(e) = self.wrapper.checkin(&checkout.checkout_token) {
-            tracing::warn!(
-                "Failed to checkin token '{}' via FFI: {} — marking as checked in anyway",
-                checkout.checkout_token,
-                e
-            );
-        }
-
-        self.checkout_repo
-            .checkin(checkout.id)
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to update checkout record: {}", e)))?;
-
-        tracing::debug!(
-            "License checked in: token='{}', user={}",
-            checkout.checkout_token,
-            checkout.user_id
-        );
-
-        Ok(())
+    /// Release all licenses (emergency shutdown)
+    pub fn release_all(&self) {
+        self.wrapper.release_all();
     }
 
     /// Invalidate the cached pool status
