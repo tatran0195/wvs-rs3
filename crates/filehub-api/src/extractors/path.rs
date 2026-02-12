@@ -1,6 +1,5 @@
 //! Typed path parameter helpers.
 
-use axum::extract::Path;
 use uuid::Uuid;
 
 use filehub_core::error::AppError;

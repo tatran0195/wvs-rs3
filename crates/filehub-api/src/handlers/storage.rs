@@ -44,9 +44,9 @@ pub async fn get_usage(
 
 /// POST /api/storages/:id/transfer
 pub async fn initiate_transfer(
-    State(state): State<AppState>,
-    auth: AuthUser,
-    Path(id): Path<Uuid>,
+    State(_state): State<AppState>,
+    _auth: AuthUser,
+    Path(_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     // let transfer = state
     //     .storage_service

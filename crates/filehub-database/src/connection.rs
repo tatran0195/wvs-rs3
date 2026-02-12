@@ -1,10 +1,12 @@
 //! PostgreSQL connection pool management.
 
+use std::time::Duration;
+
+use sqlx::postgres::{PgPool, PgPoolOptions};
+use tracing::info;
+
 use filehub_core::config::DatabaseConfig;
 use filehub_core::error::{AppError, ErrorKind};
-use sqlx::postgres::{PgPool, PgPoolOptions};
-use std::time::Duration;
-use tracing::info;
 
 /// Wrapper around the sqlx PostgreSQL connection pool.
 #[derive(Debug, Clone)]

@@ -24,7 +24,7 @@ impl CacheManager {
     /// Create a new cache manager from configuration.
     pub async fn new(config: &CacheConfig) -> AppResult<Self> {
         let inner: Arc<dyn CacheProvider> = match config.provider.as_str() {
-            #[cfg(feature = "redis-backend")]
+            #[cfg(feature = "redis")]
             "redis" => {
                 info!("Initializing Redis cache provider");
                 let client = crate::redis::RedisClient::connect(&config.redis).await?;

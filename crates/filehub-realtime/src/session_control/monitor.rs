@@ -5,8 +5,6 @@ use std::sync::Arc;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use filehub_database::repositories::session::SessionRepository;
-
 use crate::connection::handle::ConnectionInfo;
 use crate::connection::manager::ConnectionManager;
 use crate::message::types::OutboundMessage;
@@ -16,17 +14,12 @@ use crate::message::types::OutboundMessage;
 pub struct SessionMonitor {
     /// Connection manager
     connections: Arc<ConnectionManager>,
-    /// Session repository
-    session_repo: Arc<SessionRepository>,
 }
 
 impl SessionMonitor {
     /// Create a new session monitor
-    pub fn new(connections: Arc<ConnectionManager>, session_repo: Arc<SessionRepository>) -> Self {
-        Self {
-            connections,
-            session_repo,
-        }
+    pub fn new(connections: Arc<ConnectionManager>) -> Self {
+        Self { connections }
     }
 
     /// Get all active connection info for admin view

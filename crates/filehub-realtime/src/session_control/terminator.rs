@@ -2,13 +2,11 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
 use tracing;
 
 use filehub_core::types::id::SessionId;
 
 use crate::connection::manager::ConnectionManager;
-use crate::message::types::OutboundMessage;
 
 /// Terminate a session via WebSocket.
 ///

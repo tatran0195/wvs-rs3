@@ -5,9 +5,9 @@ edition.workspace = true
 description = "Cache providers (Redis and in-memory) for FileHub"
 
 [features]
-default = ["memory", "redis-backend"]
+default = ["memory", "redis"]
 memory = ["dep:moka", "dep:dashmap"]
-redis-backend = ["dep:redis"]
+redis = ["dep:redis"]
 
 [dependencies]
 filehub-core.workspace = true
@@ -23,8 +23,7 @@ uuid.workspace = true
 
 moka = { workspace = true, optional = true }
 redis = { workspace = true, optional = true }
-dashmap = { version = "5", optional = true }
+dashmap = { version = "6", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
-dashmap = "5"

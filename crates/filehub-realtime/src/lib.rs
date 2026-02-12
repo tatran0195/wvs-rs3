@@ -7,9 +7,7 @@
 //! - User presence tracking (online/idle/away/dnd/offline)
 //! - Admin session monitoring and control
 //! - Domain event → notification bridging
-//! - Multi-node support via Redis pub/sub bridge
 
-pub mod bridge;
 pub mod channel;
 pub mod connection;
 pub mod message;

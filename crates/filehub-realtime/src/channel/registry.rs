@@ -16,7 +16,7 @@ pub struct ChannelRegistry {
     /// Active channels by name
     channels: DashMap<String, Arc<Channel>>,
     /// Default buffer size for new channels
-    buffer_size: usize,
+    _buffer_size: usize,
 }
 
 impl ChannelRegistry {
@@ -24,7 +24,7 @@ impl ChannelRegistry {
     pub fn new(buffer_size: usize) -> Self {
         Self {
             channels: DashMap::new(),
-            buffer_size,
+            _buffer_size: buffer_size,
         }
     }
 

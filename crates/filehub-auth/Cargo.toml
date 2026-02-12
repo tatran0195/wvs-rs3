@@ -39,6 +39,7 @@ redis = { workspace = true, optional = true }
 
 # Password strength
 zxcvbn = { workspace = true }
+sha2 = { workspace = true }
 
 [features]
 default = ["redis-seat"]

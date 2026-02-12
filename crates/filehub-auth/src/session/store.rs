@@ -4,14 +4,14 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use chrono::{Duration, Utc};
-use filehub_entity::presence::PresenceStatus;
-use filehub_entity::session::model::CreateSession;
 use uuid::Uuid;
 
 use filehub_core::config::SessionConfig;
 use filehub_core::error::AppError;
 use filehub_database::repositories::session::SessionRepository;
+use filehub_entity::presence::PresenceStatus;
 use filehub_entity::session::Session;
+use filehub_entity::session::model::CreateSession;
 
 /// Abstracts session persistence operations.
 #[derive(Debug, Clone)]

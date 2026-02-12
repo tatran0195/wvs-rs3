@@ -1,9 +1,10 @@
 //! Storage provider trait for pluggable file storage backends.
 
+use std::pin::Pin;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
-use std::pin::Pin;
 
 use crate::result::AppResult;
 

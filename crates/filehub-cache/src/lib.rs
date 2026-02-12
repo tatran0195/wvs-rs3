@@ -12,7 +12,7 @@ pub mod keys;
 #[cfg(feature = "memory")]
 pub mod memory;
 pub mod provider;
-#[cfg(feature = "redis-backend")]
+#[cfg(feature = "redis")]
 pub mod redis;
 
 pub use provider::CacheManager;

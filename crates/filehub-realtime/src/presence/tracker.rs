@@ -4,10 +4,10 @@ use chrono::Utc;
 use dashmap::DashMap;
 use uuid::Uuid;
 
+use crate::message::types::OutboundMessage;
+
 use super::activity::ActivityTracker;
 use super::status::PresenceStatus;
-
-use crate::message::types::OutboundMessage;
 
 /// Tracks presence state for all users.
 #[derive(Debug)]

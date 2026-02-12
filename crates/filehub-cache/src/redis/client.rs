@@ -1,11 +1,12 @@
 //! Redis connection management.
 
-use filehub_core::config::cache::RedisCacheConfig;
-use filehub_core::error::{AppError, ErrorKind};
-use filehub_core::result::AppResult;
 use redis::Client;
 use redis::aio::ConnectionManager;
 use tracing::info;
+
+use filehub_core::config::cache::RedisCacheConfig;
+use filehub_core::error::{AppError, ErrorKind};
+use filehub_core::result::AppResult;
 
 /// Redis client wrapper with connection management.
 #[derive(Debug, Clone)]

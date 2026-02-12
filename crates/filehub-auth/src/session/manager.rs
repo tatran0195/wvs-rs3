@@ -11,6 +11,7 @@ use uuid::Uuid;
 use filehub_cache::provider::CacheManager;
 use filehub_core::config::{AuthConfig, SessionConfig};
 use filehub_core::error::AppError;
+use filehub_core::traits::CacheProvider;
 use filehub_database::repositories::user::UserRepository;
 use filehub_entity::session::Session;
 use filehub_entity::user::{User, UserStatus};
@@ -117,13 +118,21 @@ impl SessionManager {
         user_agent: Option<&str>,
         device_info: Option<serde_json::Value>,
     ) -> Result<LoginResult, AppError> {
-        // Step 1: Find user
-        let user = self
-            .user_repo
-            .find_by_username(username)
-            .await
-            .map_err(|e| AppError::internal(format!("Database error: {e}")))?
-            .ok_or_else(|| AppError::unauthorized("Invalid username or password"))?;
+        // Step 1: Find user (try cache first)
+        let user = if let Some(cached) = self.get_cached_user_by_name(username).await {
+            cached
+        } else {
+            let user = self
+                .user_repo
+                .find_by_username(username)
+                .await
+                .map_err(|e| AppError::internal(format!("Database error: {e}")))?
+                .ok_or_else(|| AppError::unauthorized("Invalid username or password"))?;
+
+            // Cache for subsequent requests
+            self.cache_user(&user).await;
+            user
+        };
 
         // Step 2: Check user status
         self.check_user_status(&user)?;
@@ -135,11 +144,18 @@ impl SessionManager {
 
         if !password_valid {
             self.handle_failed_login(&user).await?;
+            // If failed, we should probably invalidate cache to force DB lookup on next try
+            // in case password was changed but cache is stale (though password checking uses param vs hash)
+            // But strict security might suggest invalidating.
+            self.invalidate_user_cache(&user).await;
             return Err(AppError::unauthorized("Invalid username or password"));
         }
 
         // Reset failed attempts on successful password verification
         self.reset_failed_attempts(&user).await?;
+
+        // Setup cache for the fresh user state (e.g. failed attempts reset)
+        self.cache_user(&user).await;
 
         // Step 4: Resolve session limit
         let session_limit = self
@@ -243,6 +259,9 @@ impl SessionManager {
             .terminate_session(session_id, Some(user_id), "User logout")
             .await?;
 
+        // Invalidate session cache
+        self.invalidate_session_cache(session_id).await;
+
         info!(user_id = %user_id, session_id = %session_id, "Logout completed");
 
         Ok(())
@@ -280,12 +299,19 @@ impl SessionManager {
         }
 
         // Step 3: Look up current user (role may have changed)
-        let user = self
-            .user_repo
-            .find_by_id(claims.user_id())
-            .await
-            .map_err(|e| AppError::internal(format!("Database error: {e}")))?
-            .ok_or_else(|| AppError::unauthorized("User not found"))?;
+        let user = if let Some(cached) = self.get_cached_user(claims.user_id()).await {
+            cached
+        } else {
+            let user = self
+                .user_repo
+                .find_by_id(claims.user_id())
+                .await
+                .map_err(|e| AppError::internal(format!("Database error: {e}")))?
+                .ok_or_else(|| AppError::unauthorized("User not found"))?;
+
+            self.cache_user(&user).await;
+            user
+        };
 
         self.check_user_status(&user)?;
 
@@ -316,6 +342,10 @@ impl SessionManager {
             session_id = %session_id,
             "Token refreshed"
         );
+
+        // Invalidate the session in cache because its refresh token hash and last activity changed.
+        // Or we could update it, but invalidating forces a fresh fetch next time which is safer/easier.
+        self.invalidate_session_cache(session_id).await;
 
         Ok(tokens)
     }
@@ -365,6 +395,9 @@ impl SessionManager {
                 &format!("Admin termination: {reason}"),
             )
             .await?;
+
+        // Invalidate session cache
+        self.invalidate_session_cache(session_id).await;
 
         Ok(())
     }
@@ -438,11 +471,18 @@ impl SessionManager {
             return Err(AppError::unauthorized("Session has been blocked"));
         }
 
-        let session = self
-            .session_store
-            .find_by_id(session_id)
-            .await?
-            .ok_or_else(|| AppError::unauthorized("Session not found"))?;
+        let session = if let Some(cached) = self.get_cached_session(session_id).await {
+            cached
+        } else {
+            let session = self
+                .session_store
+                .find_by_id(session_id)
+                .await?
+                .ok_or_else(|| AppError::unauthorized("Session not found"))?;
+
+            self.cache_session(&session).await;
+            session
+        };
 
         if session.terminated_at.is_some() {
             return Err(AppError::unauthorized("Session has been terminated"));
@@ -600,12 +640,6 @@ impl SessionManager {
 
                 Ok(())
             }
-            unknown => {
-                error!(strategy = %unknown, "Unknown overflow strategy");
-                Err(AppError::internal(format!(
-                    "Unknown overflow strategy: {unknown}"
-                )))
-            }
         }
     }
 
@@ -645,33 +679,21 @@ impl SessionManager {
             )
             .await?;
 
-        // Override the auto-generated ID with our pre-determined one
-        // (In practice the store creates with a new UUID; we patch it)
-        // Actually, we should set the session ID before creation.
-        // For now, use the store-created session's actual ID and regenerate tokens.
-        let actual_session_id = session.id;
-
         let tokens = self.jwt_encoder.generate_token_pair(
             user.id,
-            actual_session_id,
+            session.id,
             &user.role,
             &user.username,
         )?;
 
-        // Update hashes with final tokens
-        let token_hash = sha256_hash(&tokens.access_token);
-        let refresh_hash = sha256_hash(&tokens.refresh_token);
-
         // Update session with correct hashes
         let _ = self
             .session_store
-            .update_refresh_token(actual_session_id, &refresh_hash)
+            .update_refresh_token(session.id, &refresh_hash)
             .await;
 
         // Mark seat as allocated
-        self.session_store
-            .set_seat_allocated(actual_session_id)
-            .await?;
+        self.session_store.set_seat_allocated(session.id).await?;
 
         session.seat_allocated_at = Some(Utc::now());
 
@@ -681,17 +703,97 @@ impl SessionManager {
             user: user.clone(),
         })
     }
+    /// Invalidates the user cache (by ID and username if possible).
+    async fn invalidate_user_cache(&self, user: &User) {
+        let _ = self.cache.delete(&format!("user:id:{}", user.id)).await;
+        let _ = self
+            .cache
+            .delete(&format!("user:name:{}", user.username))
+            .await;
+    }
+
+    /// Invalidates the session cache.
+    async fn invalidate_session_cache(&self, session_id: Uuid) {
+        let _ = self.cache.delete(&format!("session:{}", session_id)).await;
+    }
+
+    /// Caches the user for faster lookups.
+    async fn cache_user(&self, user: &User) {
+        // Cache by ID
+        if let Ok(json) = serde_json::to_string(user) {
+            let _ = self
+                .cache
+                .set(
+                    &format!("user:id:{}", user.id),
+                    &json,
+                    std::time::Duration::from_secs(900), // 15 min
+                )
+                .await;
+        }
+
+        // Cache by Username
+        if let Ok(json) = serde_json::to_string(user) {
+            let _ = self
+                .cache
+                .set(
+                    &format!("user:name:{}", user.username),
+                    &json,
+                    std::time::Duration::from_secs(900), // 15 min
+                )
+                .await;
+        }
+    }
+
+    /// Caches the session for faster validation.
+    async fn cache_session(&self, session: &Session) {
+        if let Ok(json) = serde_json::to_string(session) {
+            let _ = self
+                .cache
+                .set(
+                    &format!("session:{}", session.id),
+                    &json,
+                    std::time::Duration::from_secs(300), // 5 min
+                )
+                .await;
+        }
+    }
+
+    /// Tries to get a cached user by ID.
+    async fn get_cached_user(&self, user_id: Uuid) -> Option<User> {
+        if let Ok(Some(json)) = self.cache.get(&format!("user:id:{}", user_id)).await {
+            if let Ok(user) = serde_json::from_str(&json) {
+                return Some(user);
+            }
+        }
+        None
+    }
+
+    /// Tries to get a cached user by Username.
+    async fn get_cached_user_by_name(&self, username: &str) -> Option<User> {
+        if let Ok(Some(json)) = self.cache.get(&format!("user:name:{}", username)).await {
+            if let Ok(user) = serde_json::from_str(&json) {
+                return Some(user);
+            }
+        }
+        None
+    }
+
+    /// Tries to get a cached session.
+    async fn get_cached_session(&self, session_id: Uuid) -> Option<Session> {
+        if let Ok(Some(json)) = self.cache.get(&format!("session:{}", session_id)).await {
+            if let Ok(session) = serde_json::from_str(&json) {
+                return Some(session);
+            }
+        }
+        None
+    }
 }
 
 /// Computes a SHA-256 hash of the input string and returns it as a hex string.
 fn sha256_hash(input: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    // Using a simple hash for token comparison.
-    // In production you might use SHA-256 from ring or sha2 crate.
-    // We'll do a basic approach that works without extra deps.
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    let h = hasher.finish();
-    format!("{:016x}", h)
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    format!("{:x}", result)
 }

@@ -59,10 +59,7 @@ impl RealtimeEngine {
             notification_service,
             config.notifications.clone(),
         ));
-        let session_monitor = Arc::new(SessionMonitor::new(
-            Arc::clone(&connections),
-            Arc::clone(&session_repo),
-        ));
+        let session_monitor = Arc::new(SessionMonitor::new(Arc::clone(&connections)));
 
         tracing::info!(
             "Realtime engine created: max_conn_per_user={}, channel_buf={}, max_subs={}",

@@ -1,8 +1,9 @@
 //! Database migration runner.
 
-use filehub_core::error::{AppError, ErrorKind};
 use sqlx::PgPool;
 use tracing::info;
+
+use filehub_core::error::{AppError, ErrorKind};
 
 /// Run all pending database migrations.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), AppError> {

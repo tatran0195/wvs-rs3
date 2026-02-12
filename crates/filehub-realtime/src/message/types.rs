@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use filehub_core::types::id::{FileId, FolderId, SessionId, UserId};
+use filehub_core::types::id::SessionId;
 
 /// Messages received FROM clients via WebSocket.
 #[derive(Debug, Clone, Serialize, Deserialize)]
