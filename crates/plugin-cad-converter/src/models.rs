@@ -1,10 +1,12 @@
 //! Domain models: file types, conversion modes, inputs, outputs, options.
 
-use crate::error::ConversionError;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::ConversionError;
 
 /// Normalize path to forward slashes for Python script embedding.
 fn normalize_path_for_python(path: &Path) -> String {
