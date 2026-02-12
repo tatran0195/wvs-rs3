@@ -85,7 +85,7 @@ impl DownloadService {
 
         let data = self
             .storage
-            .read(file.storage_id, &file.storage_path)
+            .read(&file.storage_id, &file.storage_path)
             .await
             .map_err(|e| AppError::internal(format!("Storage read failed: {e}")))?;
 
@@ -135,9 +135,14 @@ impl DownloadService {
             .map_err(|e| AppError::internal(format!("Database error: {e}")))?
             .ok_or_else(|| AppError::not_found(format!("Version {version_number} not found")))?;
 
-        let data = self
+        let provider = self
             .storage
-            .read(file.storage_id, &version.storage_path)
+            .get(&file.storage_id)
+            .await
+            .map_err(|e| AppError::internal(format!("Storage provider not found: {e}")))?;
+
+        let data = provider
+            .read_bytes(&version.storage_path)
             .await
             .map_err(|e| AppError::internal(format!("Storage read failed: {e}")))?;
 
@@ -170,9 +175,14 @@ impl DownloadService {
             .map_err(|e| AppError::internal(format!("Database error: {e}")))?
             .ok_or_else(|| AppError::not_found("File not found"))?;
 
-        let data = self
+        let provider = self
             .storage
-            .read(storage_id, storage_path)
+            .get(&storage_id)
+            .await
+            .map_err(|e| AppError::internal(format!("Storage provider not found: {e}")))?;
+
+        let data = provider
+            .read_bytes(storage_path)
             .await
             .map_err(|e| AppError::internal(format!("Storage read failed: {e}")))?;
 

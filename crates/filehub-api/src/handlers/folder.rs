@@ -2,6 +2,7 @@
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use filehub_core::types::PageRequest;
 use uuid::Uuid;
 
 use filehub_core::error::AppError;
@@ -50,8 +51,9 @@ pub async fn list_children(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
+    Query(page): Query<PageRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let children = state.folder_service.list_children(&auth, id).await?;
+    let children = state.folder_service.list_children(&auth, id, page).await?;
     Ok(Json(
         serde_json::json!({ "success": true, "data": children }),
     ))

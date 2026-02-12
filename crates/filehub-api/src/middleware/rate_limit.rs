@@ -2,12 +2,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use axum::extract::ConnectInfo;
-use axum::http::{Request, StatusCode};
-use axum::middleware::Next;
-use axum::response::Response;
 use tokio::sync::Mutex;
 
 /// Simple in-memory token bucket rate limiter.

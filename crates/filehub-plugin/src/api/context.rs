@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Context passed to plugins providing access to FileHub services.

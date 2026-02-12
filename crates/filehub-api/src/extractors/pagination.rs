@@ -1,6 +1,5 @@
 //! Pagination query parameter extractor.
 
-use axum::extract::Query;
 use serde::{Deserialize, Serialize};
 
 use filehub_core::types::pagination::PageRequest;
@@ -36,9 +35,7 @@ impl PaginationParams {
 
         PageRequest {
             page,
-            per_page,
-            sort_by: self.sort_by,
-            sort_dir: self.sort_dir,
+            page_size: per_page,
         }
     }
 }

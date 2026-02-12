@@ -2,8 +2,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::watch;
-use tokio_cron_scheduler::{Job as CronJob, JobScheduler, JobSchedulerError};
+use tokio_cron_scheduler::{Job as CronJob, JobScheduler};
 use tracing;
 
 use filehub_core::error::AppError;
@@ -63,7 +62,7 @@ impl CronScheduler {
     }
 
     /// Shutdown the scheduler
-    pub async fn shutdown(&self) -> Result<(), AppError> {
+    pub async fn shutdown(&mut self) -> Result<(), AppError> {
         self.scheduler
             .shutdown()
             .await

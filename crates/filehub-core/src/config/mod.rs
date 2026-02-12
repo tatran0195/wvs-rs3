@@ -7,8 +7,10 @@
 pub mod app;
 pub mod auth;
 pub mod cache;
+pub mod database;
 pub mod license;
 pub mod logging;
+pub mod plugin;
 pub mod realtime;
 pub mod session;
 pub mod storage;
@@ -16,15 +18,17 @@ pub mod worker;
 
 use serde::{Deserialize, Serialize};
 
-use self::app::ServerConfig;
-use self::auth::AuthConfig;
-use self::cache::CacheConfig;
-use self::license::LicenseConfig;
-use self::logging::LoggingConfig;
-use self::realtime::RealtimeConfig;
-use self::session::SessionConfig;
-use self::storage::StorageConfig;
-use self::worker::WorkerConfig;
+pub use self::app::{CorsConfig, ServerConfig};
+pub use self::auth::AuthConfig;
+pub use self::cache::CacheConfig;
+pub use self::database::DatabaseConfig;
+pub use self::license::LicenseConfig;
+pub use self::logging::LoggingConfig;
+pub use self::plugin::PluginConfig;
+pub use self::realtime::{NotificationRealtimeConfig, RealtimeConfig};
+pub use self::session::SessionConfig;
+pub use self::storage::StorageConfig;
+pub use self::worker::WorkerConfig;
 
 use crate::error::AppError;
 
@@ -58,36 +62,6 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
 }
 
-/// Database connection pool configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DatabaseConfig {
-    /// PostgreSQL connection URL.
-    pub url: String,
-    /// Maximum number of connections in the pool.
-    #[serde(default = "default_max_connections")]
-    pub max_connections: u32,
-    /// Minimum number of connections in the pool.
-    #[serde(default = "default_min_connections")]
-    pub min_connections: u32,
-    /// Connection timeout in seconds.
-    #[serde(default = "default_connect_timeout")]
-    pub connect_timeout_seconds: u64,
-    /// Idle connection timeout in seconds.
-    #[serde(default = "default_idle_timeout")]
-    pub idle_timeout_seconds: u64,
-}
-
-/// Plugin system configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginConfig {
-    /// Directory containing plugin shared libraries.
-    #[serde(default = "default_plugin_directory")]
-    pub directory: String,
-    /// Whether to automatically load plugins on startup.
-    #[serde(default = "default_true")]
-    pub auto_load: bool,
-}
-
 impl AppConfig {
     /// Load configuration from TOML files.
     ///
@@ -109,28 +83,4 @@ impl AppConfig {
             .try_deserialize()
             .map_err(|e| AppError::configuration(format!("Failed to deserialize config: {e}")))
     }
-}
-
-fn default_max_connections() -> u32 {
-    20
-}
-
-fn default_min_connections() -> u32 {
-    5
-}
-
-fn default_connect_timeout() -> u64 {
-    10
-}
-
-fn default_idle_timeout() -> u64 {
-    300
-}
-
-fn default_plugin_directory() -> String {
-    "./plugins".to_string()
-}
-
-fn default_true() -> bool {
-    true
 }

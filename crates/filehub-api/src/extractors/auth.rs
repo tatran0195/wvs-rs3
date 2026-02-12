@@ -1,7 +1,6 @@
 //! `AuthUser` extractor — pulls JWT from the Authorization header, validates, and injects context.
 
 use axum::extract::FromRequestParts;
-use axum::http::StatusCode;
 use axum::http::request::Parts;
 
 use filehub_core::error::AppError;
@@ -27,7 +26,6 @@ impl std::ops::Deref for AuthUser {
     }
 }
 
-#[axum::async_trait]
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 

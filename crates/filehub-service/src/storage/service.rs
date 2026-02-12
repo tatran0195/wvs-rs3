@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
-use tracing::info;
 use uuid::Uuid;
 
 use filehub_auth::rbac::RbacEnforcer;
@@ -89,9 +87,11 @@ impl StorageService {
             .await
             .map_err(|e| AppError::internal(format!("Failed to get counts: {e}")))?;
 
+        let used_bytes = storage.used_bytes.unwrap_or(0);
+
         let usage_percent = storage.quota_bytes.map(|quota| {
             if quota > 0 {
-                (storage.used_bytes as f64 / quota as f64) * 100.0
+                (used_bytes as f64 / quota as f64) * 100.0
             } else {
                 0.0
             }
@@ -100,7 +100,7 @@ impl StorageService {
         Ok(StorageUsage {
             storage_id: storage.id,
             name: storage.name,
-            used_bytes: storage.used_bytes,
+            used_bytes,
             quota_bytes: storage.quota_bytes,
             usage_percent,
             file_count,

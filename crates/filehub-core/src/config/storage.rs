@@ -26,9 +26,23 @@ pub struct StorageConfig {
     /// S3-compatible storage configuration.
     #[serde(default)]
     pub s3: S3StorageConfig,
-    /// WebDAV server configuration.
+    /// Configuration for file conversions (e.g. CAD).
     #[serde(default)]
-    pub webdav_server: WebDavServerConfig,
+    pub conversions: ConversionConfig,
+}
+
+/// Configuration for file conversions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConversionConfig {
+    /// Whether conversion is enabled.
+    pub enabled: bool,
+}
+
+impl Default for ConversionConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
 }
 
 /// Local filesystem storage configuration.
@@ -70,30 +84,6 @@ pub struct S3StorageConfig {
     pub secret_key: String,
 }
 
-/// WebDAV server configuration (the server FileHub exposes).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WebDavServerConfig {
-    /// Whether the WebDAV server is enabled.
-    #[serde(default)]
-    pub enabled: bool,
-    /// WebDAV server port.
-    #[serde(default = "default_webdav_port")]
-    pub port: u16,
-    /// HTTP Basic auth realm string.
-    #[serde(default = "default_webdav_realm")]
-    pub auth_realm: String,
-}
-
-impl Default for WebDavServerConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            port: default_webdav_port(),
-            auth_realm: default_webdav_realm(),
-        }
-    }
-}
-
 fn default_data_root() -> String {
     "./data".to_string()
 }
@@ -120,12 +110,4 @@ fn default_local_root() -> String {
 
 fn default_region() -> String {
     "us-east-1".to_string()
-}
-
-fn default_webdav_port() -> u16 {
-    8081
-}
-
-fn default_webdav_realm() -> String {
-    "FileHub WebDAV".to_string()
 }

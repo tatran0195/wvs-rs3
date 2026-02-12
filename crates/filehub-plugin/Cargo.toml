@@ -1,12 +1,13 @@
 [package]
 name = "filehub-plugin"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Plugin framework with hook registry, dispatcher, and dynamic loading for FileHub"
 
 [dependencies]
 filehub-core = { path = "../filehub-core" }
 filehub-entity = { path = "../filehub-entity" }
+filehub-cache = { path = "../filehub-cache" }
 
 # Async
 tokio = { workspace = true }

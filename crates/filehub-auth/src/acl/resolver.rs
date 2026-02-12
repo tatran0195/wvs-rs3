@@ -13,11 +13,11 @@ use uuid::Uuid;
 
 use filehub_cache::provider::CacheManager;
 use filehub_core::error::AppError;
+use filehub_core::traits::CacheProvider;
 use filehub_entity::permission::{AclPermission, ResourceType};
 use filehub_entity::user::UserRole;
 
 use crate::rbac::RbacEnforcer;
-use crate::rbac::policies::SystemPermission;
 
 use super::checker::AclChecker;
 use super::inheritance::AclInheritanceResolver;
@@ -105,7 +105,7 @@ impl EffectivePermissionResolver {
             user_id, resource_type, resource_id, required_permission
         );
 
-        if let Ok(Some(cached)) = self.cache.get::<String>(&cache_key).await {
+        if let Ok(Some(cached)) = self.cache.get(&cache_key).await {
             if let Ok(perm) = serde_json::from_str::<EffectivePermission>(&cached) {
                 return Ok(perm);
             }
@@ -127,7 +127,7 @@ impl EffectivePermissionResolver {
         if let Ok(serialized) = serde_json::to_string(&result) {
             let _ = self
                 .cache
-                .set_with_ttl(&cache_key, &serialized, std::time::Duration::from_secs(300))
+                .set(&cache_key, &serialized, std::time::Duration::from_secs(300))
                 .await;
         }
 

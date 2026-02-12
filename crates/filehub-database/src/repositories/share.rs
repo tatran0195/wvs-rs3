@@ -141,6 +141,42 @@ impl ShareRepository {
         Ok(row.0)
     }
 
+    /// Update last accessed timestamp.
+    pub async fn update_last_accessed(
+        &self,
+        share_id: Uuid,
+        accessed_at: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<()> {
+        sqlx::query("UPDATE shares SET last_accessed = $2 WHERE id = $1")
+            .bind(share_id)
+            .bind(accessed_at)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to update last accessed", e)
+            })?;
+        Ok(())
+    }
+
+    /// Update a share record.
+    pub async fn update(&self, share: &Share) -> AppResult<Share> {
+        sqlx::query_as::<_, Share>(
+            "UPDATE shares SET permission = $2, allow_download = $3, max_downloads = $4, \
+             expires_at = $5, is_active = $6 \
+             WHERE id = $1 RETURNING *",
+        )
+        .bind(share.id)
+        .bind(&share.permission)
+        .bind(share.allow_download)
+        .bind(share.max_downloads)
+        .bind(share.expires_at)
+        .bind(share.is_active)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to update share", e))?
+        .ok_or_else(|| AppError::not_found(format!("Share {} not found", share.id)))
+    }
+
     /// Deactivate a share.
     pub async fn deactivate(&self, share_id: Uuid) -> AppResult<bool> {
         let result = sqlx::query("UPDATE shares SET is_active = FALSE WHERE id = $1")

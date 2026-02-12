@@ -41,3 +41,16 @@ pub async fn get_usage(
     let usage = state.storage_service.get_usage(&auth, id).await?;
     Ok(Json(serde_json::json!({ "success": true, "data": usage })))
 }
+
+/// POST /api/storages/:id/transfer
+pub async fn initiate_transfer(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // let transfer = state
+    //     .storage_service
+    //     .initiate_transfer(&auth, id, req)
+    //     .await?;
+    Ok(Json(serde_json::json!({ "success": true, "data": "" })))
+}

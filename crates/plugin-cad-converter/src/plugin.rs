@@ -1,207 +1,840 @@
-//! CAD converter plugin implementation — integrates with FileHub plugin system.
+//! FileHub plugin trait implementation and hook registration.
+//!
+//! Integrates the CAD conversion processor with the FileHub plugin system.
+//! Uses the flat `HookPayload` data bag to extract file upload information
+//! and signal conversion requirements via `HookResult` output data.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::config::ConversionConfig;
+use crate::metrics::MetricsSnapshot;
+use crate::models::FileType;
+use crate::processor::ConversionProcessor;
 
 use async_trait::async_trait;
-use serde_json::Value;
-use tracing;
-
 use filehub_core::error::AppError;
-use filehub_core::types::id::FileId;
-use filehub_plugin::hooks::definitions::{
-    HookAction, HookContext, HookHandler, HookPayload, HookResult,
-};
+use filehub_plugin::hooks::definitions::{HookPayload, HookPoint, HookResult};
 use filehub_plugin::hooks::registry::HookRegistry;
-use filehub_plugin::registry::PluginInfo;
+use std::sync::Arc;
+use tracing::{debug, info, warn};
 
-use crate::converter::{CadConverter, ConversionRequest};
-use crate::formats::mapping::{ConversionMapping, ConversionTarget};
+/// Plugin name used for registration, logging, and hook results.
+const PLUGIN_NAME: &str = "cad-converter";
 
-/// CAD converter plugin for FileHub
+/// Plugin version from Cargo manifest.
+const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Well-known payload data keys for file upload hooks.
+///
+/// These keys are expected to be set by the core file upload handler
+/// before the `AfterUpload` hook fires.
+#[allow(dead_code)]
+mod payload_keys {
+    /// File name of the uploaded file (String).
+    pub const FILE_NAME: &str = "file_name";
+    /// UUID of the file entity (String, parseable as UUID).
+    pub const FILE_ID: &str = "file_id";
+    /// UUID of the storage backend (String, parseable as UUID).
+    pub const STORAGE_ID: &str = "storage_id";
+    /// Storage path where the file was written (String).
+    pub const STORAGE_PATH: &str = "storage_path";
+    /// File size in bytes (i64).
+    pub const FILE_SIZE: &str = "file_size";
+    /// UUID of the user who uploaded (String, parseable as UUID).
+    pub const UPLOADED_BY: &str = "uploaded_by";
+    /// MIME type of the uploaded file (String).
+    pub const MIME_TYPE: &str = "mime_type";
+}
+
+/// Well-known output keys set by this plugin in hook results.
+///
+/// The worker system reads these keys to determine if a conversion
+/// job should be created.
+mod output_keys {
+    /// Whether CAD conversion is required (bool).
+    pub const CONVERSION_REQUIRED: &str = "cad_conversion_required";
+    /// Detected file type name (String, debug format of FileType).
+    pub const FILE_TYPE: &str = "cad_file_type";
+    /// Input path for the conversion (String).
+    pub const INPUT_PATH: &str = "cad_input_path";
+    /// File entity ID (String).
+    pub const FILE_ID: &str = "cad_file_id";
+    /// Storage ID (String).
+    pub const STORAGE_ID: &str = "cad_storage_id";
+    /// Whether this is a VTFx pass-through (no Jupiter needed) (bool).
+    pub const IS_PASSTHROUGH: &str = "cad_is_vtfx_passthrough";
+    /// Available conversion slots at time of detection (i64).
+    pub const AVAILABLE_SLOTS: &str = "cad_available_slots";
+    /// Whether the file type is a results/post format (bool).
+    pub const IS_RESULTS: &str = "cad_is_results_format";
+}
+
+/// The CAD converter plugin for FileHub.
+///
+/// Wraps the `ConversionProcessor` and exposes it to the FileHub plugin
+/// system via hooks. The `after_upload` hook inspects uploaded files and
+/// signals conversion requirements to the worker system.
 #[derive(Debug)]
 pub struct CadConverterPlugin {
-    /// Plugin information
-    info: PluginInfo,
-    /// The CAD converter instance
-    converter: Option<Arc<CadConverter>>,
-    /// Output directory for converted files
-    output_dir: PathBuf,
+    /// Plugin configuration.
+    config: ConversionConfig,
+    /// The conversion processor (created on initialize).
+    processor: Arc<tokio::sync::RwLock<Option<Arc<ConversionProcessor>>>>,
+    /// Whether the plugin has been successfully initialized.
+    initialized: Arc<tokio::sync::RwLock<bool>>,
 }
 
 impl CadConverterPlugin {
-    /// Create a new CAD converter plugin
+    /// Create a new plugin with default configuration.
     pub fn new() -> Self {
         Self {
-            info: PluginInfo {
-                name: "cad-converter".to_string(),
-                version: "1.0.0".to_string(),
-                description: "CAD file format conversion".to_string(),
-                author: "Suzuki FileHub".to_string(),
-            },
-            converter: None,
-            output_dir: PathBuf::from("./data/cache/conversions"),
+            config: ConversionConfig::default(),
+            processor: Arc::new(tokio::sync::RwLock::new(None)),
+            initialized: Arc::new(tokio::sync::RwLock::new(false)),
         }
     }
 
-    /// Initialize the plugin with configuration
-    pub async fn initialize(
-        &mut self,
-        temp_dir: PathBuf,
-        output_dir: PathBuf,
-        custom_mappings: Option<ConversionMapping>,
-    ) -> Result<Arc<CadConverter>, AppError> {
-        let mapping = custom_mappings.unwrap_or_default();
+    /// Create a new plugin with the given configuration.
+    pub fn with_config(config: ConversionConfig) -> Self {
+        Self {
+            config,
+            processor: Arc::new(tokio::sync::RwLock::new(None)),
+            initialized: Arc::new(tokio::sync::RwLock::new(false)),
+        }
+    }
+}
 
-        self.output_dir = output_dir;
+impl CadConverterPlugin {
+    /// Initialize the plugin: resolve Jupiter path and create the processor.
+    pub async fn initialize(&self) -> Result<Arc<ConversionProcessor>, AppError> {
+        if !self.config.enabled {
+            info!(plugin = PLUGIN_NAME, "CAD converter plugin is disabled");
+            return Err(AppError::internal("CAD converter plugin is disabled"));
+        }
 
-        tokio::fs::create_dir_all(&self.output_dir)
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to create output dir: {}", e)))?;
+        info!(
+            plugin = PLUGIN_NAME,
+            version = PLUGIN_VERSION,
+            "Initializing CAD converter plugin"
+        );
 
-        let converter = Arc::new(CadConverter::new(mapping, temp_dir));
-
-        let tools = converter.check_available_tools().await;
-        for tool in &tools {
-            if tool.available {
-                tracing::info!(
-                    "CAD conversion tool available: '{}' (formats: {:?})",
-                    tool.command,
-                    tool.formats
+        // Resolve Jupiter-Web installation (auto-discover if not configured)
+        let mut config = self.config.clone();
+        match config.resolve_jupiter_path() {
+            Ok(path) => {
+                info!(
+                    jupiter_path = %path.display(),
+                    summary = %config.jupiter_summary(),
+                    "Jupiter-Web resolved"
                 );
-            } else {
-                tracing::warn!(
-                    "CAD conversion tool NOT available: '{}' (formats: {:?})",
-                    tool.command,
-                    tool.formats
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Jupiter-Web not found — plugin will initialize but conversions will fail. \
+                     Install Jupiter-Web or set jupiter_path in config."
                 );
+                // Don't fail initialization — allow the plugin to load so it can
+                // report the error when a conversion is actually attempted
             }
         }
 
-        self.converter = Some(Arc::clone(&converter));
-        tracing::info!("CAD converter plugin initialized");
-        Ok(converter)
-    }
-
-    /// Register hooks with the hook registry
-    pub fn register_hooks(&self, registry: &mut HookRegistry) -> Result<(), AppError> {
-        let converter = self
-            .converter
-            .as_ref()
-            .ok_or_else(|| AppError::internal("CAD converter plugin not initialized"))?;
-
-        registry.register(
-            "after_upload",
-            Arc::new(AfterUploadHook::new(
-                Arc::clone(converter),
-                self.output_dir.clone(),
-            )),
+        info!(
+            max_global = config.max_global_concurrency,
+            max_io = config.max_io_concurrency,
+            timeout_s = config.jupiter_timeout_seconds,
+            max_retries = config.max_retries,
+            "Concurrency and timeout settings"
         );
 
-        tracing::info!("CAD converter hooks registered: after_upload");
+        let processor = ConversionProcessor::new(config.clone()).map_err(|e| {
+            AppError::internal(format!("Failed to create conversion processor: {}", e))
+        })?;
+
+        info!(
+            extensions = FileType::SUPPORTED_EXTENSIONS.len(),
+            temp_root = %config.effective_temp_root().display(),
+            jupiter_resolved = config.is_jupiter_resolved(),
+            "CAD converter initialized"
+        );
+
+        let processor = Arc::new(processor);
+        let mut proc_lock = self.processor.write().await;
+        *proc_lock = Some(processor.clone());
+        let mut init_lock = self.initialized.write().await;
+        *init_lock = true;
+        Ok(processor)
+    }
+
+    /// Shut down the plugin gracefully.
+    pub async fn shutdown(&self) -> Result<(), AppError> {
+        let proc_lock = self.processor.read().await;
+        if let Some(proc) = &*proc_lock {
+            let snap = proc.metrics_snapshot();
+            info!(
+                plugin = PLUGIN_NAME,
+                started = snap.conversions_started,
+                succeeded = snap.conversions_succeeded,
+                failed = snap.conversions_failed,
+                timed_out = snap.conversions_timed_out,
+                "CAD converter shutting down — final metrics"
+            );
+        }
         Ok(())
     }
 
-    /// Get plugin info
-    pub fn info(&self) -> &PluginInfo {
-        &self.info
-    }
-
-    /// Get the converter
-    pub fn converter(&self) -> Option<&Arc<CadConverter>> {
-        self.converter.as_ref()
-    }
-}
-
-impl Default for CadConverterPlugin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Hook handler for after_upload: check if file is CAD and queue conversion
-struct AfterUploadHook {
-    /// The CAD converter
-    converter: Arc<CadConverter>,
-    /// Output directory for conversions
-    output_dir: PathBuf,
-}
-
-impl AfterUploadHook {
-    /// Create a new after_upload hook handler
-    fn new(converter: Arc<CadConverter>, output_dir: PathBuf) -> Self {
-        Self {
-            converter,
-            output_dir,
+    /// Register hooks with the FileHub hook registry.
+    pub async fn register_hooks(&self, registry: &HookRegistry) {
+        if !self.config.enabled {
+            return;
         }
-    }
-}
 
-impl std::fmt::Debug for AfterUploadHook {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AfterUploadHook")
-            .field("output_dir", &self.output_dir)
-            .finish()
-    }
-}
-
-#[async_trait]
-impl HookHandler for AfterUploadHook {
-    fn name(&self) -> &str {
-        "cad_converter_after_upload"
-    }
-
-    fn priority(&self) -> i32 {
-        50
-    }
-
-    async fn execute(&self, ctx: &HookContext, payload: &HookPayload) -> HookResult {
-        let file_name = match payload.get_str("file_name") {
-            Some(name) => name.to_string(),
+        let proc_lock = self.processor.read().await;
+        let processor = match &*proc_lock {
+            Some(p) => Arc::clone(p),
             None => {
-                tracing::debug!("after_upload: no file_name in payload, skipping CAD check");
-                return Ok(HookAction::Continue(None));
+                warn!(
+                    plugin = PLUGIN_NAME,
+                    "Cannot register hooks: plugin not initialized"
+                );
+                return;
             }
         };
 
-        if !self.converter.is_convertible(&file_name) {
-            tracing::debug!(
-                "File '{}' is not a CAD file, skipping conversion",
-                file_name
-            );
-            return Ok(HookAction::Continue(None));
+        registry
+            .register(
+                HookPoint::AfterUpload,
+                Arc::new(HookHandlerAdapter {
+                    inner: Box::new(AfterUploadHandler {
+                        processor: processor.clone(),
+                    }),
+                }),
+            )
+            .await;
+
+        registry
+            .register(
+                HookPoint::OnServerStart,
+                Arc::new(HookHandlerAdapter {
+                    inner: Box::new(OnServerStartHandler {
+                        processor: processor.clone(),
+                    }),
+                }),
+            )
+            .await;
+
+        registry
+            .register(
+                HookPoint::OnServerShutdown,
+                Arc::new(HookHandlerAdapter {
+                    inner: Box::new(OnServerShutdownHandler { processor }),
+                }),
+            )
+            .await;
+
+        info!(
+            plugin = PLUGIN_NAME,
+            "Registered hooks: after_upload, on_server_start, on_server_shutdown"
+        );
+    }
+
+    /// Check if a filename is a supported CAD/FEA file type.
+    pub fn is_supported_file(filename: &str) -> bool {
+        FileType::from_path_ref(std::path::Path::new(filename))
+            .map(|ft| ft.is_processable())
+            .unwrap_or(false)
+    }
+
+    /// Get the processor reference (if initialized).
+    pub async fn processor(&self) -> Option<Arc<ConversionProcessor>> {
+        self.processor.read().await.clone()
+    }
+
+    /// Get a metrics snapshot (if initialized).
+    pub async fn metrics_snapshot(&self) -> Option<MetricsSnapshot> {
+        self.processor
+            .read()
+            .await
+            .as_ref()
+            .map(|p| p.metrics_snapshot())
+    }
+
+    /// Whether the plugin is initialized.
+    pub async fn is_initialized(&self) -> bool {
+        *self.initialized.read().await
+    }
+
+    /// Get the configuration.
+    pub fn config(&self) -> &ConversionConfig {
+        &self.config
+    }
+}
+
+#[async_trait::async_trait]
+impl filehub_plugin::registry::Plugin for CadConverterPlugin {
+    fn info(&self) -> filehub_plugin::registry::PluginInfo {
+        filehub_plugin::registry::PluginInfo {
+            id: PLUGIN_NAME.to_string(),
+            name: "CAD Converter".to_string(),
+            version: PLUGIN_VERSION.to_string(),
+            description: "TechnoStar Jupiter-based CAD/FEA converter plugin".to_string(),
+            author: "TechnoStar".to_string(),
+            hooks: self.registered_hooks(),
+            enabled: self.config.enabled,
+            priority: 100,
         }
+    }
 
-        let file_id_str = payload.get_str("file_id").unwrap_or_default();
-        let source_path_str = payload.get_str("storage_path").unwrap_or_default();
+    async fn on_load(&self) -> Result<(), String> {
+        info!(plugin = PLUGIN_NAME, "Plugin loaded");
+        Ok(())
+    }
 
-        let format = self.converter.detect_format(&file_name);
-        let targets = self.converter.supported_targets(&file_name);
+    async fn on_start(&self) -> Result<(), String> {
+        info!(plugin = PLUGIN_NAME, "Plugin started");
+        Ok(())
+    }
 
-        tracing::info!(
-            "CAD file detected: '{}' (format: {:?}), queuing conversion to {:?}",
-            file_name,
-            format,
-            targets
+    async fn on_stop(&self) -> Result<(), String> {
+        info!(plugin = PLUGIN_NAME, "Plugin stopped");
+        Ok(())
+    }
+
+    async fn on_unload(&self) -> Result<(), String> {
+        info!(plugin = PLUGIN_NAME, "Plugin unloaded");
+        Ok(())
+    }
+
+    fn registered_hooks(&self) -> Vec<HookPoint> {
+        vec![
+            HookPoint::AfterUpload,
+            HookPoint::OnServerStart,
+            HookPoint::OnServerShutdown,
+        ]
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hook handler trait
+// ---------------------------------------------------------------------------
+
+/// Trait for hook handlers that the CAD converter plugin registers.
+///
+/// This mirrors the handler interface expected by `HookRegistry`. Each handler
+/// receives a `HookPayload` and returns a `HookResult`.
+#[async_trait]
+pub trait CadHookHandler: Send + Sync + std::fmt::Debug {
+    /// Handle a hook invocation.
+    async fn handle(&self, payload: &HookPayload) -> HookResult;
+
+    /// The name of this handler (for logging and debugging).
+    fn name(&self) -> &str;
+}
+
+// ---------------------------------------------------------------------------
+// AfterUpload hook handler
+// ---------------------------------------------------------------------------
+
+/// Handles the `after_upload` hook point.
+///
+/// When a file is uploaded, this handler:
+/// 1. Reads the file name from the payload data bag
+/// 2. Checks if the extension maps to a supported CAD/FEA type
+/// 3. If supported, returns a `HookResult` with output data signaling
+///    the worker system to create a conversion job
+/// 4. If not supported, returns a simple continue result
+#[derive(Debug)]
+struct AfterUploadHandler {
+    /// Reference to the shared conversion processor.
+    processor: Arc<ConversionProcessor>,
+}
+
+#[async_trait]
+impl CadHookHandler for AfterUploadHandler {
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
+        // Extract file name from the payload data bag
+        let file_name = match payload.get_string(payload_keys::FILE_NAME) {
+            Some(name) => name,
+            None => {
+                debug!(
+                    hook = %payload.hook,
+                    "after_upload payload missing '{}' key, skipping",
+                    payload_keys::FILE_NAME
+                );
+                return HookResult::continue_execution(PLUGIN_NAME);
+            }
+        };
+
+        // Determine file type from the name
+        let file_type = match FileType::from_path_ref(std::path::Path::new(file_name)) {
+            Some(ft) if ft.is_processable() => ft,
+            _ => {
+                debug!(
+                    file = %file_name,
+                    "File is not a supported CAD/FEA format, skipping"
+                );
+                return HookResult::continue_execution(PLUGIN_NAME);
+            }
+        };
+
+        // Extract additional metadata from the payload
+        let file_id = payload
+            .get_string(payload_keys::FILE_ID)
+            .unwrap_or("unknown");
+        let storage_id = payload
+            .get_string(payload_keys::STORAGE_ID)
+            .unwrap_or("unknown");
+        let storage_path = payload.get_string(payload_keys::STORAGE_PATH).unwrap_or("");
+
+        info!(
+            file = %file_name,
+            file_type = ?file_type,
+            file_id = %file_id,
+            "CAD/FEA file detected, signaling for conversion"
         );
 
-        let job_payload = serde_json::json!({
-            "type": "cad_conversion",
-            "file_id": file_id_str,
-            "file_name": file_name,
-            "source_path": source_path_str,
-            "targets": targets,
-            "output_dir": self.output_dir.to_string_lossy(),
-            "format": format,
-        });
+        // Build output data that the worker system will read
+        let mut output = serde_json::Map::new();
+        output.insert(
+            output_keys::CONVERSION_REQUIRED.to_string(),
+            serde_json::Value::Bool(true),
+        );
+        output.insert(
+            output_keys::FILE_TYPE.to_string(),
+            serde_json::Value::String(format!("{:?}", file_type)),
+        );
+        output.insert(
+            output_keys::INPUT_PATH.to_string(),
+            serde_json::Value::String(storage_path.to_string()),
+        );
+        output.insert(
+            output_keys::FILE_ID.to_string(),
+            serde_json::Value::String(file_id.to_string()),
+        );
+        output.insert(
+            output_keys::STORAGE_ID.to_string(),
+            serde_json::Value::String(storage_id.to_string()),
+        );
+        output.insert(
+            output_keys::IS_PASSTHROUGH.to_string(),
+            serde_json::Value::Bool(file_type.is_vtfx_format()),
+        );
+        output.insert(
+            output_keys::IS_RESULTS.to_string(),
+            serde_json::Value::Bool(file_type.is_results_format()),
+        );
+        output.insert(
+            output_keys::AVAILABLE_SLOTS.to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                self.processor.available_global_slots(),
+            )),
+        );
 
-        Ok(HookAction::Continue(Some(serde_json::json!({
-            "queue_job": {
-                "job_type": "cad_conversion",
-                "queue": "conversion",
-                "priority": "normal",
-                "payload": job_payload,
-            }
-        }))))
+        HookResult::continue_with_output(PLUGIN_NAME, serde_json::Value::Object(output))
+    }
+
+    fn name(&self) -> &str {
+        "cad-converter:after_upload"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OnServerStart hook handler
+// ---------------------------------------------------------------------------
+
+/// Handles the `on_server_start` hook point — logs readiness info.
+#[derive(Debug)]
+struct OnServerStartHandler {
+    /// Reference to the shared conversion processor.
+    processor: Arc<ConversionProcessor>,
+}
+
+#[async_trait]
+impl CadHookHandler for OnServerStartHandler {
+    async fn handle(&self, _payload: &HookPayload) -> HookResult {
+        info!(
+            plugin = PLUGIN_NAME,
+            extensions = FileType::SUPPORTED_EXTENSIONS.len(),
+            slots = self.processor.available_global_slots(),
+            "CAD converter plugin ready"
+        );
+        HookResult::continue_execution(PLUGIN_NAME)
+    }
+
+    fn name(&self) -> &str {
+        "cad-converter:on_server_start"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OnServerShutdown hook handler
+// ---------------------------------------------------------------------------
+
+/// Handles the `on_server_shutdown` hook point — logs final metrics.
+#[derive(Debug)]
+struct OnServerShutdownHandler {
+    /// Reference to the shared conversion processor.
+    processor: Arc<ConversionProcessor>,
+}
+
+#[async_trait]
+impl CadHookHandler for OnServerShutdownHandler {
+    async fn handle(&self, _payload: &HookPayload) -> HookResult {
+        let snap = self.processor.metrics_snapshot();
+        info!(
+            plugin = PLUGIN_NAME,
+            started = snap.conversions_started,
+            succeeded = snap.conversions_succeeded,
+            failed = snap.conversions_failed,
+            timed_out = snap.conversions_timed_out,
+            cancelled = snap.conversions_cancelled,
+            vtfx_passthrough = snap.vtfx_passthrough_count,
+            output_bytes = snap.total_output_bytes,
+            "CAD converter final metrics"
+        );
+        HookResult::continue_execution(PLUGIN_NAME)
+    }
+
+    fn name(&self) -> &str {
+        "cad-converter:on_server_shutdown"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Adapter: bridge CadHookHandler → filehub_plugin HookHandler
+// ---------------------------------------------------------------------------
+
+/// Adapter that wraps a `CadHookHandler` to implement the `filehub_plugin`
+/// hook handler trait.
+///
+/// The `filehub_plugin::hooks::registry::HookRegistry` expects handlers that
+/// implement a specific trait. This adapter bridges our typed handlers to
+/// that interface.
+#[derive(Debug)]
+struct HookHandlerAdapter {
+    /// The inner handler.
+    inner: Box<dyn CadHookHandler>,
+}
+
+#[async_trait]
+impl filehub_plugin::hooks::registry::HookHandler for HookHandlerAdapter {
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
+        self.inner.handle(payload).await
+    }
+
+    fn plugin_id(&self) -> &str {
+        PLUGIN_NAME
+    }
+
+    fn priority(&self) -> i32 {
+        // Default priority for CAD converter plugin
+        100
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Factory functions
+// ---------------------------------------------------------------------------
+
+/// Plugin factory — creates a new instance with default configuration.
+pub fn create_plugin() -> CadConverterPlugin {
+    CadConverterPlugin::new()
+}
+
+/// Plugin factory with custom configuration.
+pub fn create_plugin_with_config(config: ConversionConfig) -> CadConverterPlugin {
+    CadConverterPlugin::with_config(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use filehub_plugin::HookAction;
+
+    #[test]
+    fn test_is_supported_file() {
+        // CAD formats
+        assert!(CadConverterPlugin::is_supported_file("model.stp"));
+        assert!(CadConverterPlugin::is_supported_file("model.step"));
+        assert!(CadConverterPlugin::is_supported_file("drawing.dwg"));
+        assert!(CadConverterPlugin::is_supported_file("part.x_t"));
+        assert!(CadConverterPlugin::is_supported_file("part.sldprt"));
+
+        // FEA formats
+        assert!(CadConverterPlugin::is_supported_file("mesh.bdf"));
+        assert!(CadConverterPlugin::is_supported_file("mesh.dat"));
+        assert!(CadConverterPlugin::is_supported_file("results.op2"));
+
+        // VTFx pass-through
+        assert!(CadConverterPlugin::is_supported_file("vis.vtfx"));
+
+        // Not supported
+        assert!(!CadConverterPlugin::is_supported_file("document.pdf"));
+        assert!(!CadConverterPlugin::is_supported_file("image.png"));
+        assert!(!CadConverterPlugin::is_supported_file("readme.md"));
+        assert!(!CadConverterPlugin::is_supported_file("archive.tar.gz"));
+    }
+
+    #[tokio::test]
+    async fn test_plugin_default_state() {
+        let plugin = CadConverterPlugin::new();
+        assert!(!plugin.is_initialized().await);
+        assert!(plugin.processor().await.is_none());
+        assert!(plugin.metrics_snapshot().await.is_none());
+        assert!(plugin.config().enabled);
+    }
+
+    #[test]
+    fn test_plugin_disabled() {
+        let config = ConversionConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let plugin = CadConverterPlugin::with_config(config);
+        assert!(!plugin.config().enabled);
+    }
+
+    #[tokio::test]
+    async fn test_plugin_initialize_enabled() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_plugin_init_test")),
+            ..Default::default()
+        };
+        let plugin = CadConverterPlugin::with_config(config);
+        plugin.initialize().await.expect("should initialize");
+        assert!(plugin.is_initialized().await);
+        assert!(plugin.processor().await.is_some());
+        assert!(plugin.metrics_snapshot().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_plugin_initialize_disabled() {
+        let config = ConversionConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let plugin = CadConverterPlugin::with_config(config);
+        plugin.initialize().await.expect("should succeed");
+        assert!(!plugin.is_initialized().await);
+        assert!(plugin.processor().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_plugin_shutdown_with_metrics() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_shutdown_test_v2")),
+            ..Default::default()
+        };
+        let plugin = CadConverterPlugin::with_config(config);
+        plugin.initialize().await.expect("init");
+        plugin.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn test_after_upload_handler_cad_file() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_hook_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = AfterUploadHandler {
+            processor: Arc::new(processor),
+        };
+
+        let payload = HookPayload::new(HookPoint::AfterUpload)
+            .with_data(
+                payload_keys::FILE_NAME,
+                serde_json::Value::String("model.stp".to_string()),
+            )
+            .with_data(
+                payload_keys::FILE_ID,
+                serde_json::Value::String(uuid::Uuid::new_v4().to_string()),
+            )
+            .with_data(
+                payload_keys::STORAGE_ID,
+                serde_json::Value::String(uuid::Uuid::new_v4().to_string()),
+            )
+            .with_data(
+                payload_keys::STORAGE_PATH,
+                serde_json::Value::String("/storage/local/model.stp".to_string()),
+            );
+
+        let result = handler.handle(&payload).await;
+
+        // Should continue with output data
+        assert_eq!(result.plugin_id, PLUGIN_NAME);
+        let output = result.output.expect("should have output");
+        let obj = output.as_object().expect("should be object");
+        assert_eq!(
+            obj.get(output_keys::CONVERSION_REQUIRED),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            obj.get(output_keys::IS_PASSTHROUGH),
+            Some(&serde_json::Value::Bool(false))
+        );
+        assert!(obj.get(output_keys::FILE_TYPE).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_after_upload_handler_non_cad_file() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_hook_noncad_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = AfterUploadHandler {
+            processor: Arc::new(processor),
+        };
+
+        let payload = HookPayload::new(HookPoint::AfterUpload).with_data(
+            payload_keys::FILE_NAME,
+            serde_json::Value::String("document.pdf".to_string()),
+        );
+
+        let result = handler.handle(&payload).await;
+
+        assert_eq!(result.plugin_id, PLUGIN_NAME);
+        assert!(result.output.is_none());
+        assert!(matches!(result.action, HookAction::Continue));
+    }
+
+    #[tokio::test]
+    async fn test_after_upload_handler_vtfx_passthrough() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_hook_vtfx_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = AfterUploadHandler {
+            processor: Arc::new(processor),
+        };
+
+        let payload = HookPayload::new(HookPoint::AfterUpload).with_data(
+            payload_keys::FILE_NAME,
+            serde_json::Value::String("visualization.vtfx".to_string()),
+        );
+
+        let result = handler.handle(&payload).await;
+
+        let output = result.output.expect("should have output");
+        let obj = output.as_object().expect("object");
+        assert_eq!(
+            obj.get(output_keys::CONVERSION_REQUIRED),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            obj.get(output_keys::IS_PASSTHROUGH),
+            Some(&serde_json::Value::Bool(true))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_after_upload_handler_missing_filename() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_hook_noname_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = AfterUploadHandler {
+            processor: Arc::new(processor),
+        };
+
+        // Payload with no file_name key
+        let payload = HookPayload::new(HookPoint::AfterUpload);
+
+        let result = handler.handle(&payload).await;
+
+        assert!(result.output.is_none());
+        assert!(matches!(result.action, HookAction::Continue));
+    }
+
+    #[tokio::test]
+    async fn test_after_upload_handler_results_format() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_hook_results_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = AfterUploadHandler {
+            processor: Arc::new(processor),
+        };
+
+        let payload = HookPayload::new(HookPoint::AfterUpload).with_data(
+            payload_keys::FILE_NAME,
+            serde_json::Value::String("analysis.op2".to_string()),
+        );
+
+        let result = handler.handle(&payload).await;
+
+        let output = result.output.expect("should have output");
+        let obj = output.as_object().expect("object");
+        assert_eq!(
+            obj.get(output_keys::IS_RESULTS),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            obj.get(output_keys::IS_PASSTHROUGH),
+            Some(&serde_json::Value::Bool(false))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_server_start_handler() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_start_handler_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = OnServerStartHandler {
+            processor: Arc::new(processor),
+        };
+
+        let payload = HookPayload::new(HookPoint::OnServerStart);
+        let result = handler.handle(&payload).await;
+
+        assert_eq!(result.plugin_id, PLUGIN_NAME);
+        assert!(matches!(result.action, HookAction::Continue));
+    }
+
+    #[tokio::test]
+    async fn test_server_shutdown_handler() {
+        let config = ConversionConfig {
+            enabled: true,
+            temp_root: Some(std::env::temp_dir().join("filehub_stop_handler_test")),
+            ..Default::default()
+        };
+        let processor = ConversionProcessor::new(config).expect("create");
+        let handler = OnServerShutdownHandler {
+            processor: Arc::new(processor),
+        };
+
+        let payload = HookPayload::new(HookPoint::OnServerShutdown);
+        let result = handler.handle(&payload).await;
+
+        assert_eq!(result.plugin_id, PLUGIN_NAME);
+        assert!(matches!(result.action, HookAction::Continue));
+    }
+
+    #[test]
+    fn test_factory_functions() {
+        let p1 = create_plugin();
+        assert!(p1.config().enabled);
+
+        let p2 = create_plugin_with_config(ConversionConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        assert!(!p2.config().enabled);
     }
 }

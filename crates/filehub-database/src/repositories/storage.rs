@@ -93,6 +93,29 @@ impl StorageRepository {
         Ok(())
     }
 
+    /// Get file and folder counts for a storage.
+    pub async fn get_counts(&self, storage_id: Uuid) -> AppResult<(i64, i64)> {
+        let file_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE storage_id = $1")
+                .bind(storage_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(ErrorKind::Database, "Failed to count files", e)
+                })?;
+
+        let folder_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM folders WHERE storage_id = $1")
+                .bind(storage_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(ErrorKind::Database, "Failed to count folders", e)
+                })?;
+
+        Ok((file_count, folder_count))
+    }
+
     /// Delete a storage.
     pub async fn delete(&self, storage_id: Uuid) -> AppResult<bool> {
         let result = sqlx::query("DELETE FROM storages WHERE id = $1")
@@ -103,5 +126,42 @@ impl StorageRepository {
                 AppError::with_source(ErrorKind::Database, "Failed to delete storage", e)
             })?;
         Ok(result.rows_affected() > 0)
+    }
+    /// Recalculate used bytes for all storages.
+    pub async fn recalculate_usage(&self) -> AppResult<u64> {
+        // Reset all usage to 0 first (optional, but safer if files were deleted without updating storage)
+        // Then sum up file sizes per storage and update.
+        // Doing this in a single query if possible is better.
+
+        let result = sqlx::query(
+            "UPDATE storages s \
+             SET used_bytes = (SELECT COALESCE(SUM(size_bytes), 0) FROM files f WHERE f.storage_id = s.id), \
+                 updated_at = NOW()",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to recalculate storage usage", e))?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Get total used bytes across all storages.
+    pub async fn total_used_bytes(&self) -> AppResult<i64> {
+        let total: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(used_bytes), 0) FROM storages")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(
+                    ErrorKind::Database,
+                    "Failed to calculate total storage usage",
+                    e,
+                )
+            })?;
+        Ok(total)
+    }
+
+    /// Find all storages with usage data (alias for find_all for now as it includes used_bytes).
+    pub async fn find_all_with_usage(&self) -> AppResult<Vec<Storage>> {
+        self.find_all().await
     }
 }

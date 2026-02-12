@@ -1,17 +1,15 @@
 //! # filehub-plugin
 //!
-//! Plugin framework for Suzuki FileHub. Provides:
+//! Plugin framework for FileHub. Provides:
 //!
 //! - Plugin lifecycle management (load, init, start, stop, unload)
 //! - Hook registry with priority-ordered registration
 //! - Hook dispatcher with Continue/Halt semantics
 //! - Plugin API context exposing services to plugins
-//! - Optional dynamic loading via `libloading`
+//! - Optional dynamic loading via `libloading` (later)
 
 pub mod api;
-pub mod ffi;
 pub mod hooks;
-pub mod loader;
 pub mod manager;
 pub mod registry;
 

@@ -46,7 +46,7 @@ impl SearchService {
     /// Searches files using full-text search and optional filters.
     pub async fn search(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         req: SearchRequest,
         page: PageRequest,
     ) -> Result<PageResponse<File>, AppError> {
@@ -57,17 +57,7 @@ impl SearchService {
         }
 
         self.file_repo
-            .search(
-                &req.query,
-                req.folder_id,
-                req.storage_id,
-                req.mime_type.as_deref(),
-                req.owner_id,
-                req.min_size,
-                req.max_size,
-                ctx.user_id,
-                page,
-            )
+            .search(&req.query, req.storage_id, &page)
             .await
             .map_err(|e| AppError::internal(format!("Search failed: {e}")))
     }

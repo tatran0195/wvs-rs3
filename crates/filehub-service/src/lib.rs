@@ -1,6 +1,6 @@
 //! # filehub-service
 //!
-//! Business logic service layer for Suzuki FileHub. Each service orchestrates
+//! Business logic service layer for FileHub. Each service orchestrates
 //! repositories, cache, storage providers, and authentication to implement
 //! application-level use cases.
 //!

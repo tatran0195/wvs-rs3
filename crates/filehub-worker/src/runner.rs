@@ -8,7 +8,6 @@ use tokio::time;
 use tracing;
 
 use filehub_core::config::WorkerConfig;
-use filehub_core::error::AppError;
 
 use crate::executor::{JobExecutionError, JobExecutor};
 use crate::queue::JobQueue;
@@ -108,7 +107,7 @@ impl WorkerRunner {
 
     /// Poll for a job and execute it if available
     async fn poll_and_execute(&self, semaphore: &Arc<tokio::sync::Semaphore>) {
-        let permit = match semaphore.try_acquire() {
+        let permit = match semaphore.clone().try_acquire_owned() {
             Ok(p) => p,
             Err(_) => {
                 tracing::trace!("All worker slots occupied, waiting...");
@@ -134,8 +133,8 @@ impl WorkerRunner {
                         "Processing job: id={}, type='{}', attempt={}/{}",
                         job_id,
                         job_type,
-                        attempts + 1,
-                        max_attempts
+                        attempts.unwrap_or(0) + 1,
+                        max_attempts.unwrap_or(0)
                     );
 
                     match executor.execute(&job).await {
@@ -151,7 +150,7 @@ impl WorkerRunner {
                         }
                         Err(JobExecutionError::Transient(msg)) => {
                             tracing::warn!("Job {} failed (transient): {}", job_id, msg);
-                            if attempts + 1 < max_attempts {
+                            if attempts.unwrap_or(0) + 1 < max_attempts.unwrap_or(0) {
                                 if let Err(e) = queue.retry(job_id).await {
                                     tracing::error!("Failed to retry job {}: {}", job_id, e);
                                 }

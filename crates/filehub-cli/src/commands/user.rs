@@ -93,7 +93,7 @@ pub async fn execute(
                 .ok_or_else(|| AppError::not_found(&format!("User '{}' not found", username)))?;
 
             user_repo
-                .update_status(user.id, filehub_entity::user::status::UserStatus::Active)
+                .update_status(user.id, filehub_entity::user::UserStatus::Active)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to enable user: {}", e)))?;
 
@@ -107,7 +107,7 @@ pub async fn execute(
                 .ok_or_else(|| AppError::not_found(&format!("User '{}' not found", username)))?;
 
             user_repo
-                .update_status(user.id, filehub_entity::user::status::UserStatus::Inactive)
+                .update_status(user.id, filehub_entity::user::UserStatus::Inactive)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to disable user: {}", e)))?;
 

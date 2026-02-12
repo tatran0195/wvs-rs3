@@ -1,6 +1,5 @@
 //! CAD conversion job handler.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,7 +8,6 @@ use tracing;
 use uuid::Uuid;
 
 use filehub_core::error::AppError;
-use filehub_core::types::id::FileId;
 use filehub_entity::job::model::Job;
 
 use crate::executor::{JobExecutionError, JobHandler};

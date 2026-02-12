@@ -1,5 +1,10 @@
 -- Sessions
-CREATE TYPE IF NOT EXISTS presence_status AS ENUM ('active', 'idle', 'away', 'dnd', 'offline');
+DO $$ BEGIN
+    CREATE TYPE presence_status AS ENUM ('active', 'idle', 'away', 'dnd', 'offline');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 CREATE TABLE IF NOT EXISTS sessions (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

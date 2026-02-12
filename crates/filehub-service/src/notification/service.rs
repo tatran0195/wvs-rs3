@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
-use tracing::info;
 use uuid::Uuid;
 
 use filehub_core::error::AppError;
@@ -33,7 +31,7 @@ impl NotificationService {
         page: PageRequest,
     ) -> Result<PageResponse<Notification>, AppError> {
         self.notif_repo
-            .find_by_user(ctx.user_id, page)
+            .find_by_user(ctx.user_id, &page)
             .await
             .map_err(|e| AppError::internal(format!("Failed to list notifications: {e}")))
     }
@@ -53,15 +51,15 @@ impl NotificationService {
         notification_id: Uuid,
     ) -> Result<(), AppError> {
         self.notif_repo
-            .mark_read(notification_id, ctx.user_id, Utc::now())
+            .mark_read(notification_id, ctx.user_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to mark read: {e}")))
     }
 
     /// Marks all notifications as read for the current user.
-    pub async fn mark_all_read(&self, ctx: &RequestContext) -> Result<u64, AppError> {
+    pub async fn mark_all_read(&self, ctx: &RequestContext) -> Result<i64, AppError> {
         self.notif_repo
-            .mark_all_read(ctx.user_id, Utc::now())
+            .mark_all_read(ctx.user_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to mark all read: {e}")))
     }
@@ -84,11 +82,20 @@ impl NotificationService {
         notification: Notification,
     ) -> Result<Notification, AppError> {
         self.notif_repo
-            .create(&notification)
+            .create(
+                notification.user_id,
+                &notification.category,
+                &notification.event_type,
+                &notification.title,
+                &notification.message,
+                notification.payload.as_ref(),
+                notification.priority.as_deref(),
+                notification.actor_id,
+                notification.resource_type.as_deref(),
+                notification.resource_id,
+            )
             .await
-            .map_err(|e| AppError::internal(format!("Failed to create notification: {e}")))?;
-
-        Ok(notification)
+            .map_err(|e| AppError::internal(format!("Failed to create notification: {e}")))
     }
 
     /// Gets the user's notification preferences.
@@ -96,10 +103,13 @@ impl NotificationService {
         &self,
         ctx: &RequestContext,
     ) -> Result<NotificationPreference, AppError> {
-        self.notif_repo
+        let prefs = self
+            .notif_repo
             .get_preferences(ctx.user_id)
             .await
-            .map_err(|e| AppError::internal(format!("Failed to get preferences: {e}")))
+            .map_err(|e| AppError::internal(format!("Failed to get preferences: {e}")))?;
+
+        Ok(prefs.unwrap_or_else(|| NotificationPreference::default_for_user(ctx.user_id)))
     }
 
     /// Updates the user's notification preferences.
@@ -109,7 +119,7 @@ impl NotificationService {
         preferences: serde_json::Value,
     ) -> Result<NotificationPreference, AppError> {
         self.notif_repo
-            .upsert_preferences(ctx.user_id, preferences)
+            .upsert_preferences(ctx.user_id, &preferences)
             .await
             .map_err(|e| AppError::internal(format!("Failed to update preferences: {e}")))
     }

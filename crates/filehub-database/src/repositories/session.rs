@@ -73,7 +73,7 @@ impl SessionRepository {
     }
 
     /// Count active sessions for a user.
-    pub async fn count_active_by_user(&self, user_id: Uuid) -> AppResult<u32> {
+    pub async fn count_active_by_user(&self, user_id: Uuid) -> AppResult<i64> {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND terminated_at IS NULL AND expires_at > NOW()"
         )
@@ -81,11 +81,11 @@ impl SessionRepository {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to count active sessions", e))?;
-        Ok(count as u32)
+        Ok(count)
     }
 
     /// Count all active sessions system-wide.
-    pub async fn count_all_active(&self) -> AppResult<u32> {
+    pub async fn count_all_active(&self) -> AppResult<i64> {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sessions WHERE terminated_at IS NULL AND expires_at > NOW()",
         )
@@ -98,7 +98,7 @@ impl SessionRepository {
                 e,
             )
         })?;
-        Ok(count as u32)
+        Ok(count)
     }
 
     /// Find the oldest active session for a user.
@@ -150,6 +150,19 @@ impl SessionRepository {
             page.page_size,
             total as u64,
         ))
+    }
+
+    /// List all active sessions without pagination (for admin view).
+    pub async fn find_active_by_user_all(&self) -> AppResult<Vec<Session>> {
+        sqlx::query_as::<_, Session>(
+            "SELECT * FROM sessions WHERE terminated_at IS NULL AND expires_at > NOW() \
+             ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to list all active sessions", e)
+        })
     }
 
     /// Create a new session.
@@ -338,5 +351,122 @@ impl SessionRepository {
                 AppError::with_source(ErrorKind::Database, "Failed to delete session", e)
             })?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Find expired or idle sessions for cleanup.
+    pub async fn find_expired_or_idle(
+        &self,
+        now: DateTime<Utc>,
+        idle_cutoff: DateTime<Utc>,
+    ) -> AppResult<Vec<Session>> {
+        sqlx::query_as::<_, Session>(
+            "SELECT * FROM sessions WHERE (expires_at < $1) OR (last_activity < $2 AND terminated_at IS NULL)"
+        )
+            .bind(now)
+            .bind(idle_cutoff)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to find expired sessions", e))
+    }
+
+    /// Find sessions with stale WebSocket connections (connected but no activity).
+    pub async fn find_stale_ws_connections(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> AppResult<Vec<Session>> {
+        sqlx::query_as::<_, Session>(
+            "SELECT * FROM sessions WHERE ws_connected = TRUE AND last_activity < $1 AND terminated_at IS NULL",
+        )
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to find stale WS connections", e))
+    }
+
+    /// Find active sessions that have been idle for too long.
+    pub async fn find_idle_sessions(&self, cutoff: DateTime<Utc>) -> AppResult<Vec<Session>> {
+        sqlx::query_as::<_, Session>(
+            "SELECT * FROM sessions WHERE last_activity < $1 AND terminated_at IS NULL AND (presence_status != 'idle' OR presence_status IS NULL)",
+        )
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to find idle sessions", e))
+    }
+
+    /// Set WebSocket connection state.
+    pub async fn set_ws_connected(
+        &self,
+        session_id: Uuid,
+        connected: bool,
+        connected_at: Option<DateTime<Utc>>,
+    ) -> AppResult<()> {
+        if connected {
+            sqlx::query(
+                "UPDATE sessions SET ws_connected = TRUE, ws_connected_at = $2 WHERE id = $1",
+            )
+            .bind(session_id)
+            .bind(connected_at)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to update WS state", e)
+            })?;
+        } else {
+            sqlx::query("UPDATE sessions SET ws_connected = FALSE WHERE id = $1")
+                .bind(session_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(ErrorKind::Database, "Failed to update WS state", e)
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Set presence status.
+    pub async fn set_presence_status(
+        &self,
+        session_id: Uuid,
+        status: filehub_entity::presence::PresenceStatus,
+    ) -> AppResult<()> {
+        sqlx::query("UPDATE sessions SET presence_status = $2 WHERE id = $1")
+            .bind(session_id)
+            .bind(&status)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to update presence", e)
+            })?;
+        Ok(())
+    }
+
+    /// Set seat allocated timestamp.
+    pub async fn set_seat_allocated(&self, session_id: Uuid) -> AppResult<()> {
+        sqlx::query("UPDATE sessions SET seat_allocated_at = NOW() WHERE id = $1")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to set seat allocated", e)
+            })?;
+        Ok(())
+    }
+
+    /// Update refresh token hash.
+    pub async fn update_refresh_token_hash(
+        &self,
+        session_id: Uuid,
+        new_hash: &str,
+    ) -> AppResult<()> {
+        sqlx::query("UPDATE sessions SET refresh_token_hash = $2 WHERE id = $1")
+            .bind(session_id)
+            .bind(new_hash)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to update refresh token", e)
+            })?;
+        Ok(())
     }
 }

@@ -38,7 +38,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(admin_routes())
         .merge(health_routes());
 
-    let ws_routes = Router::new().route("/ws", get(handlers::ws::ws_upgrade));
+    let ws_routes = Router::new().route("/ws", get(handlers::ws::ws_handler));
 
     let cors = build_cors_layer(&state);
 
@@ -77,14 +77,14 @@ fn user_routes() -> Router<AppState> {
 fn file_routes() -> Router<AppState> {
     Router::new()
         .route("/files", get(handlers::file::list_files))
-        .route("/files/:id", get(handlers::file::get_file))
-        .route("/files/:id", put(handlers::file::update_file))
-        .route("/files/:id", delete(handlers::file::delete_file))
-        .route("/files/:id/download", get(handlers::file::download_file))
-        .route("/files/:id/preview", get(handlers::file::preview_file))
-        .route("/files/:id/versions", get(handlers::file::list_versions))
+        .route("/files/{id}", get(handlers::file::get_file))
+        .route("/files/{id}", put(handlers::file::update_file))
+        .route("/files/{id}", delete(handlers::file::delete_file))
+        .route("/files/{id}/download", get(handlers::file::download_file))
+        .route("/files/{id}/preview", get(handlers::file::preview_file))
+        .route("/files/{id}/versions", get(handlers::file::list_versions))
         .route(
-            "/files/:id/versions/:ver",
+            "/files/{id}/versions/{ver}",
             get(handlers::file::download_version),
         )
         .route("/files/upload", post(handlers::file::upload_file))
@@ -93,17 +93,17 @@ fn file_routes() -> Router<AppState> {
             post(handlers::file::initiate_chunked_upload),
         )
         .route(
-            "/files/upload/:id/chunk/:n",
+            "/files/upload/{id}/chunk/{n}",
             put(handlers::file::upload_chunk),
         )
         .route(
-            "/files/upload/:id/complete",
+            "/files/upload/{id}/complete",
             post(handlers::file::complete_chunked_upload),
         )
-        .route("/files/:id/move", put(handlers::file::move_file))
-        .route("/files/:id/copy", post(handlers::file::copy_file))
-        .route("/files/:id/lock", post(handlers::file::lock_file))
-        .route("/files/:id/unlock", post(handlers::file::unlock_file))
+        .route("/files/{id}/move", put(handlers::file::move_file))
+        .route("/files/{id}/copy", post(handlers::file::copy_file))
+        .route("/files/{id}/lock", post(handlers::file::lock_file))
+        .route("/files/{id}/unlock", post(handlers::file::unlock_file))
 }
 
 /// Folder CRUD and tree
@@ -111,15 +111,15 @@ fn folder_routes() -> Router<AppState> {
     Router::new()
         .route("/folders", get(handlers::folder::list_root_folders))
         .route("/folders", post(handlers::folder::create_folder))
-        .route("/folders/:id", get(handlers::folder::get_folder))
-        .route("/folders/:id", put(handlers::folder::update_folder))
-        .route("/folders/:id", delete(handlers::folder::delete_folder))
+        .route("/folders/{id}", get(handlers::folder::get_folder))
+        .route("/folders/{id}", put(handlers::folder::update_folder))
+        .route("/folders/{id}", delete(handlers::folder::delete_folder))
         .route(
-            "/folders/:id/children",
+            "/folders/{id}/children",
             get(handlers::folder::list_children),
         )
-        .route("/folders/:id/tree", get(handlers::folder::get_tree))
-        .route("/folders/:id/move", put(handlers::folder::move_folder))
+        .route("/folders/{id}/tree", get(handlers::folder::get_tree))
+        .route("/folders/{id}/move", put(handlers::folder::move_folder))
 }
 
 /// Share CRUD and public access
@@ -127,28 +127,31 @@ fn share_routes() -> Router<AppState> {
     Router::new()
         .route("/shares", get(handlers::share::list_shares))
         .route("/shares", post(handlers::share::create_share))
-        .route("/shares/:id", get(handlers::share::get_share))
-        .route("/shares/:id", put(handlers::share::update_share))
-        .route("/shares/:id", delete(handlers::share::delete_share))
-        .route("/s/:token", get(handlers::share::access_shared))
-        .route("/s/:token/verify", post(handlers::share::verify_share))
+        .route("/shares/{id}", get(handlers::share::get_share))
+        .route("/shares/{id}", put(handlers::share::update_share))
+        .route("/shares/{id}", delete(handlers::share::revoke_share))
+        .route("/s/{token}", get(handlers::share::access_share))
+        .route("/s/{token}/verify", post(handlers::share::verify_share))
 }
 
 /// Permission/ACL management
 fn permission_routes() -> Router<AppState> {
     Router::new()
-        .route("/permissions/:type/:id", get(handlers::permission::get_acl))
         .route(
-            "/permissions/:type/:id",
-            post(handlers::permission::add_acl),
+            "/permissions/{type}/{id}",
+            get(handlers::permission::get_permissions),
         )
         .route(
-            "/permissions/entry/:id",
-            put(handlers::permission::update_acl),
+            "/permissions/{type}/{id}",
+            post(handlers::permission::add_permission),
         )
         .route(
-            "/permissions/entry/:id",
-            delete(handlers::permission::delete_acl),
+            "/permissions/entry/{id}",
+            put(handlers::permission::update_permission),
+        )
+        .route(
+            "/permissions/entry/{id}",
+            delete(handlers::permission::remove_permission),
         )
 }
 
@@ -156,10 +159,10 @@ fn permission_routes() -> Router<AppState> {
 fn storage_routes() -> Router<AppState> {
     Router::new()
         .route("/storages", get(handlers::storage::list_storages))
-        .route("/storages/:id", get(handlers::storage::get_storage))
-        .route("/storages/:id/usage", get(handlers::storage::get_usage))
+        .route("/storages/{id}", get(handlers::storage::get_storage))
+        .route("/storages/{id}/usage", get(handlers::storage::get_usage))
         .route(
-            "/storages/:id/transfer",
+            "/storages/{id}/transfer",
             post(handlers::storage::initiate_transfer),
         )
 }
@@ -176,7 +179,7 @@ fn notification_routes() -> Router<AppState> {
             get(handlers::notification::unread_count),
         )
         .route(
-            "/notifications/:id/read",
+            "/notifications/{id}/read",
             put(handlers::notification::mark_read),
         )
         .route(
@@ -184,7 +187,7 @@ fn notification_routes() -> Router<AppState> {
             put(handlers::notification::mark_all_read),
         )
         .route(
-            "/notifications/:id",
+            "/notifications/{id}",
             delete(handlers::notification::dismiss),
         )
         .route(
@@ -200,14 +203,8 @@ fn notification_routes() -> Router<AppState> {
 /// Presence endpoints
 fn presence_routes() -> Router<AppState> {
     Router::new()
-        .route(
-            "/presence/online",
-            get(handlers::notification::online_users),
-        )
-        .route(
-            "/presence/status",
-            put(handlers::notification::update_presence),
-        )
+    // .route("/presence/online", get(handlers::presence::online_users))
+    // .route("/presence/status", put(handlers::presence::update_presence))
 }
 
 /// Search endpoints
@@ -221,22 +218,25 @@ fn admin_routes() -> Router<AppState> {
         // User management
         .route("/admin/users", get(handlers::admin::users::list_users))
         .route("/admin/users", post(handlers::admin::users::create_user))
-        .route("/admin/users/:id", get(handlers::admin::users::get_user))
-        .route("/admin/users/:id", put(handlers::admin::users::update_user))
+        .route("/admin/users/{id}", get(handlers::admin::users::get_user))
         .route(
-            "/admin/users/:id/role",
+            "/admin/users/{id}",
+            put(handlers::admin::users::update_user),
+        )
+        .route(
+            "/admin/users/{id}/role",
             put(handlers::admin::users::change_role),
         )
         .route(
-            "/admin/users/:id/status",
+            "/admin/users/{id}/status",
             put(handlers::admin::users::change_status),
         )
         .route(
-            "/admin/users/:id/reset-password",
+            "/admin/users/{id}/reset-password",
             put(handlers::admin::users::reset_password),
         )
         .route(
-            "/admin/users/:id",
+            "/admin/users/{id}",
             delete(handlers::admin::users::delete_user),
         )
         // Storage management
@@ -249,19 +249,19 @@ fn admin_routes() -> Router<AppState> {
             post(handlers::admin::storages::add_storage),
         )
         .route(
-            "/admin/storages/:id",
+            "/admin/storages/{id}",
             put(handlers::admin::storages::update_storage),
         )
         .route(
-            "/admin/storages/:id",
+            "/admin/storages/{id}",
             delete(handlers::admin::storages::remove_storage),
         )
         .route(
-            "/admin/storages/:id/test",
+            "/admin/storages/{id}/test",
             post(handlers::admin::storages::test_storage),
         )
         .route(
-            "/admin/storages/:id/sync",
+            "/admin/storages/{id}/sync",
             post(handlers::admin::storages::sync_storage),
         )
         // Session management
@@ -270,11 +270,11 @@ fn admin_routes() -> Router<AppState> {
             get(handlers::admin::sessions::list_sessions),
         )
         .route(
-            "/admin/sessions/:id",
+            "/admin/sessions/{id}",
             get(handlers::admin::sessions::get_session),
         )
         .route(
-            "/admin/sessions/:id/terminate",
+            "/admin/sessions/{id}/terminate",
             post(handlers::admin::sessions::terminate_session),
         )
         .route(
@@ -286,30 +286,30 @@ fn admin_routes() -> Router<AppState> {
             post(handlers::admin::sessions::terminate_all),
         )
         .route(
-            "/admin/sessions/:id/send-message",
+            "/admin/sessions/{id}/send-message",
             post(handlers::admin::sessions::send_message),
         )
         // Session limits
-        .route(
-            "/admin/session-limits",
-            get(handlers::admin::sessions::get_limits),
-        )
-        .route(
-            "/admin/session-limits/role/:role",
-            put(handlers::admin::sessions::update_role_limit),
-        )
-        .route(
-            "/admin/session-limits/strategy",
-            put(handlers::admin::sessions::update_strategy),
-        )
-        .route(
-            "/admin/session-limits/user/:id",
-            post(handlers::admin::sessions::set_user_limit),
-        )
-        .route(
-            "/admin/session-limits/user/:id",
-            delete(handlers::admin::sessions::remove_user_limit),
-        )
+        // .route(
+        //     "/admin/session-limits",
+        //     get(handlers::admin::sessions::get_limits),
+        // )
+        // .route(
+        //     "/admin/session-limits/role/{role}",
+        //     put(handlers::admin::sessions::update_role_limit),
+        // )
+        // .route(
+        //     "/admin/session-limits/strategy",
+        //     put(handlers::admin::sessions::update_strategy),
+        // )
+        // .route(
+        //     "/admin/session-limits/user/{id}",
+        //     post(handlers::admin::sessions::set_user_limit),
+        // )
+        // .route(
+        //     "/admin/session-limits/user/{id}",
+        //     delete(handlers::admin::sessions::remove_user_limit),
+        // )
         // Broadcast
         .route(
             "/admin/broadcast",
@@ -334,13 +334,13 @@ fn admin_routes() -> Router<AppState> {
         )
         // Jobs
         .route("/admin/jobs", get(handlers::admin::jobs::list_jobs))
-        .route("/admin/jobs/:id", get(handlers::admin::jobs::get_job))
+        .route("/admin/jobs/{id}", get(handlers::admin::jobs::get_job))
         .route(
-            "/admin/jobs/:id/cancel",
+            "/admin/jobs/{id}/cancel",
             post(handlers::admin::jobs::cancel_job),
         )
         .route(
-            "/admin/jobs/:id/retry",
+            "/admin/jobs/{id}/retry",
             post(handlers::admin::jobs::retry_job),
         )
         // Reports
@@ -363,14 +363,14 @@ fn admin_routes() -> Router<AppState> {
 /// Health check endpoints (no auth required)
 fn health_routes() -> Router<AppState> {
     Router::new()
-        .route("/health", get(handlers::health::health_check))
-        .route("/health/detailed", get(handlers::health::detailed_health))
+        .route("/health", get(handlers::health::health))
+        .route("/health/detailed", get(handlers::health::health_detailed))
 }
 
 /// Build CORS layer from configuration
 fn build_cors_layer(state: &AppState) -> CorsLayer {
-    use http::Method;
-    use tower_http::cors::{AllowOrigin, Any};
+    use axum::http::Method;
+    use tower_http::cors::Any;
 
     let cors_config = &state.config.server.cors;
 
@@ -379,7 +379,7 @@ fn build_cors_layer(state: &AppState) -> CorsLayer {
     if cors_config.allowed_origins.contains(&"*".to_string()) {
         cors = cors.allow_origin(Any);
     } else {
-        let origins: Vec<http::HeaderValue> = cors_config
+        let origins: Vec<axum::http::HeaderValue> = cors_config
             .allowed_origins
             .iter()
             .filter_map(|o| o.parse().ok())

@@ -164,4 +164,16 @@ impl JobRepository {
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to cleanup jobs", e))?;
         Ok(result.rows_affected())
     }
+
+    /// Count jobs by status.
+    pub async fn count_by_status(&self, status: JobStatus) -> AppResult<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE status = $1")
+            .bind(status)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to count jobs by status", e)
+            })?;
+        Ok(count)
+    }
 }

@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use filehub_entity::job::CreateJob;
 use serde::{Deserialize, Serialize};
 use tracing;
 use uuid::Uuid;
@@ -50,29 +50,19 @@ impl JobQueue {
 
     /// Enqueue a new job
     pub async fn enqueue(&self, params: JobCreateParams) -> Result<Job, AppError> {
-        let now = Utc::now();
-        let job = Job {
-            id: Uuid::new_v4(),
+        let job_data = CreateJob {
             job_type: params.job_type.clone(),
             queue: params.queue.clone(),
             priority: params.priority.clone(),
             payload: params.payload.clone(),
-            result: None,
-            error_message: None,
-            status: JobStatus::Pending,
-            attempts: 0,
             max_attempts: params.max_attempts,
             scheduled_at: params.scheduled_at,
-            started_at: None,
-            completed_at: None,
-            created_by: params.created_by.map(|id| *id),
-            worker_id: None,
-            created_at: now,
-            updated_at: now,
+            created_by: params.created_by.map(|id| id.into_uuid()),
         };
 
-        self.repo
-            .create(&job)
+        let job = self
+            .repo
+            .create(&job_data)
             .await
             .map_err(|e| AppError::internal(format!("Failed to enqueue job: {}", e)))?;
 
@@ -92,7 +82,7 @@ impl JobQueue {
         for queue in queues {
             let job = self
                 .repo
-                .claim_next(queue, &self.worker_id)
+                .dequeue(queue, &self.worker_id)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to dequeue job: {}", e)))?;
 
@@ -117,7 +107,7 @@ impl JobQueue {
         result: Option<serde_json::Value>,
     ) -> Result<(), AppError> {
         self.repo
-            .mark_completed(job_id, result)
+            .complete(job_id, result.as_ref())
             .await
             .map_err(|e| AppError::internal(format!("Failed to complete job: {}", e)))?;
 
@@ -128,7 +118,7 @@ impl JobQueue {
     /// Mark a job as failed
     pub async fn fail(&self, job_id: Uuid, error: &str) -> Result<(), AppError> {
         self.repo
-            .mark_failed(job_id, error)
+            .fail(job_id, error)
             .await
             .map_err(|e| AppError::internal(format!("Failed to mark job as failed: {}", e)))?;
 
@@ -139,7 +129,7 @@ impl JobQueue {
     /// Mark a job as cancelled
     pub async fn cancel(&self, job_id: Uuid) -> Result<(), AppError> {
         self.repo
-            .mark_cancelled(job_id)
+            .cancel(job_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to cancel job: {}", e)))?;
 

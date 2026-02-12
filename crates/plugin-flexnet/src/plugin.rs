@@ -3,14 +3,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use filehub_core::config::LicenseConfig;
+use filehub_plugin::HookPoint;
 use tracing;
 
-use filehub_core::config::LicenseConfig;
 use filehub_core::error::AppError;
 use filehub_database::repositories::license::LicenseCheckoutRepository;
 use filehub_database::repositories::pool_snapshot::PoolSnapshotRepository;
 use filehub_plugin::hooks::registry::HookRegistry;
-use filehub_plugin::registry::PluginInfo;
 
 use crate::ffi::wrapper::LicenseManagerWrapper;
 use crate::hooks::{
@@ -20,45 +20,48 @@ use crate::hooks::{
 use crate::license::manager::LicenseManager;
 use crate::license::pool::PoolSyncService;
 
+/// Plugin name used for registration, logging, and hook results.
+const PLUGIN_NAME: &str = "flexnet";
+
+/// Plugin version from Cargo manifest.
+const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// FlexNet license plugin for FileHub
 #[derive(Debug)]
 pub struct FlexNetPlugin {
-    /// Plugin information
-    info: PluginInfo,
     /// License manager (set after initialization)
-    manager: Option<Arc<LicenseManager>>,
+    manager: Arc<tokio::sync::RwLock<Option<Arc<LicenseManager>>>>,
     /// Pool sync cancellation sender
-    pool_sync_cancel: Option<tokio::sync::watch::Sender<bool>>,
+    pool_sync_cancel: Arc<tokio::sync::RwLock<Option<tokio::sync::watch::Sender<bool>>>>,
 }
 
 impl FlexNetPlugin {
     /// Create a new FlexNet plugin instance
     pub fn new() -> Self {
         Self {
-            info: PluginInfo {
-                name: "flexnet".to_string(),
-                version: "1.0.0".to_string(),
-                description: "FlexNet Publisher license integration via license_proxy.dll"
-                    .to_string(),
-                author: "Suzuki FileHub".to_string(),
-            },
-            manager: None,
-            pool_sync_cancel: None,
+            manager: Arc::new(tokio::sync::RwLock::new(None)),
+            pool_sync_cancel: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
+}
 
+impl FlexNetPlugin {
     /// Initialize the plugin.
     ///
     /// Loads the DLL (or mock), creates the license manager, starts pool sync,
     /// and returns the license manager for use by other components.
     pub async fn initialize(
-        &mut self,
+        &self,
         config: LicenseConfig,
         dll_path: Option<PathBuf>,
         checkout_repo: Arc<LicenseCheckoutRepository>,
         snapshot_repo: Arc<PoolSnapshotRepository>,
     ) -> Result<Arc<LicenseManager>, AppError> {
-        tracing::info!("Initializing FlexNet plugin");
+        tracing::info!(
+            plugin = PLUGIN_NAME,
+            version = PLUGIN_VERSION,
+            "Initializing FlexNet plugin"
+        );
 
         // Create the FFI wrapper (real or mock)
         let wrapper = LicenseManagerWrapper::create(dll_path)
@@ -93,8 +96,10 @@ impl FlexNetPlugin {
             sync_service.run(rx).await;
         });
 
-        self.pool_sync_cancel = Some(tx);
-        self.manager = Some(Arc::clone(&manager));
+        let mut cancel = self.pool_sync_cancel.write().await;
+        *cancel = Some(tx);
+        let mut manager_lock = self.manager.write().await;
+        *manager_lock = Some(Arc::clone(&manager));
 
         let server_info = manager.server_info();
         let is_star = manager.is_star_license();
@@ -118,35 +123,46 @@ impl FlexNetPlugin {
     /// - `after_session_terminate` → checkin license
     /// - `on_session_expired` → checkin license
     /// - `on_session_idle` → maybe release under pressure
-    pub fn register_hooks(&self, registry: &mut HookRegistry) -> Result<(), AppError> {
-        let manager = self.manager.as_ref().ok_or_else(|| {
+    pub async fn register_hooks(&self, registry: &HookRegistry) -> Result<(), AppError> {
+        let manager_lock = self.manager.read().await;
+        let manager = manager_lock.as_ref().ok_or_else(|| {
             AppError::internal("FlexNet plugin not initialized — call initialize() first")
         })?;
 
-        registry.register(
-            "after_login",
-            Arc::new(AfterLoginHook::new(Arc::clone(manager))),
-        );
+        registry
+            .register(
+                HookPoint::AfterLogin,
+                Arc::new(AfterLoginHook::new(Arc::clone(manager))),
+            )
+            .await;
 
-        registry.register(
-            "before_logout",
-            Arc::new(BeforeLogoutHook::new(Arc::clone(manager))),
-        );
+        registry
+            .register(
+                HookPoint::BeforeLogout,
+                Arc::new(BeforeLogoutHook::new(Arc::clone(manager))),
+            )
+            .await;
 
-        registry.register(
-            "after_session_terminate",
-            Arc::new(AfterSessionTerminateHook::new(Arc::clone(manager))),
-        );
+        registry
+            .register(
+                HookPoint::AfterSessionTerminate,
+                Arc::new(AfterSessionTerminateHook::new(Arc::clone(manager))),
+            )
+            .await;
 
-        registry.register(
-            "on_session_expired",
-            Arc::new(OnSessionExpiredHook::new(Arc::clone(manager))),
-        );
+        registry
+            .register(
+                HookPoint::OnSessionExpired,
+                Arc::new(OnSessionExpiredHook::new(Arc::clone(manager))),
+            )
+            .await;
 
-        registry.register(
-            "on_session_idle",
-            Arc::new(OnSessionIdleHook::new(Arc::clone(manager), true)),
-        );
+        registry
+            .register(
+                HookPoint::OnSessionIdle,
+                Arc::new(OnSessionIdleHook::new(Arc::clone(manager), true)),
+            )
+            .await;
 
         tracing::info!(
             "FlexNet hooks registered: after_login, before_logout, \
@@ -157,39 +173,80 @@ impl FlexNetPlugin {
     }
 
     /// Get the license manager (only available after initialization)
-    pub fn manager(&self) -> Option<&Arc<LicenseManager>> {
-        self.manager.as_ref()
-    }
-
-    /// Get plugin info
-    pub fn info(&self) -> &PluginInfo {
-        &self.info
+    pub async fn manager(&self) -> Option<Arc<LicenseManager>> {
+        self.manager.read().await.clone()
     }
 
     /// Shutdown the plugin.
     ///
     /// Stops pool sync, releases all checkouts, and cleans up.
-    pub async fn shutdown(&mut self) -> Result<(), AppError> {
+    pub async fn shutdown(&self) -> Result<(), AppError> {
         tracing::info!("Shutting down FlexNet plugin");
 
         // Stop pool sync
-        if let Some(tx) = self.pool_sync_cancel.take() {
+        let mut cancel_lock = self.pool_sync_cancel.write().await;
+        if let Some(tx) = cancel_lock.take() {
             let _ = tx.send(true);
         }
 
         // Shutdown license manager (releases all via DLL + updates DB)
-        if let Some(ref manager) = self.manager {
+        let mut manager_lock = self.manager.write().await;
+        if let Some(ref manager) = *manager_lock {
             manager.shutdown().await?;
         }
 
-        self.manager = None;
+        *manager_lock = None;
         tracing::info!("FlexNet plugin shut down");
         Ok(())
     }
 }
 
-impl Default for FlexNetPlugin {
-    fn default() -> Self {
-        Self::new()
+#[async_trait::async_trait]
+impl filehub_plugin::registry::Plugin for FlexNetPlugin {
+    fn info(&self) -> filehub_plugin::registry::PluginInfo {
+        filehub_plugin::registry::PluginInfo {
+            id: "flexnet".to_string(),
+            name: PLUGIN_NAME.to_string(),
+            version: "v1.0.0".to_string(),
+            description: "FlexNet license management plugin".to_string(),
+            author: "TechnoStar".to_string(),
+            hooks: self.registered_hooks(),
+            enabled: true,
+            priority: 0,
+        }
+    }
+
+    async fn on_load(&self) -> Result<(), String> {
+        tracing::info!(plugin = PLUGIN_NAME, "Plugin loaded");
+        Ok(())
+    }
+
+    async fn on_start(&self) -> Result<(), String> {
+        tracing::info!(plugin = PLUGIN_NAME, "Plugin started");
+        Ok(())
+    }
+
+    async fn on_stop(&self) -> Result<(), String> {
+        tracing::info!(plugin = PLUGIN_NAME, "Plugin stopped");
+        Ok(())
+    }
+
+    async fn on_unload(&self) -> Result<(), String> {
+        tracing::info!(plugin = PLUGIN_NAME, "Plugin unloaded");
+        Ok(())
+    }
+
+    fn registered_hooks(&self) -> Vec<HookPoint> {
+        vec![
+            HookPoint::AfterLogin,
+            HookPoint::BeforeLogout,
+            HookPoint::AfterSessionTerminate,
+            HookPoint::OnSessionExpired,
+            HookPoint::OnSessionIdle,
+        ]
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

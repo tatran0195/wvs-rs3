@@ -61,6 +61,64 @@ impl FileRepository {
         ))
     }
 
+    /// Find a file by folder ID and name (for duplicate checking).
+    pub async fn find_by_folder_and_name(
+        &self,
+        folder_id: Uuid,
+        name: &str,
+    ) -> AppResult<Option<File>> {
+        sqlx::query_as::<_, File>("SELECT * FROM files WHERE folder_id = $1 AND name = $2")
+            .bind(folder_id)
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to find file by name", e)
+            })
+    }
+
+    /// Update a file record.
+    pub async fn update(&self, file: &File) -> AppResult<File> {
+        sqlx::query_as::<_, File>(
+            "UPDATE files SET folder_id = $2, storage_id = $3, name = $4, storage_path = $5, \
+             mime_type = $6, size_bytes = $7, checksum_sha256 = $8, metadata = $9, \
+             current_version = $10, is_locked = $11, locked_by = $12, locked_at = $13, \
+             owner_id = $14, updated_at = $15 \
+             WHERE id = $1 RETURNING *",
+        )
+        .bind(file.id)
+        .bind(file.folder_id)
+        .bind(file.storage_id)
+        .bind(&file.name)
+        .bind(&file.storage_path)
+        .bind(&file.mime_type)
+        .bind(file.size_bytes)
+        .bind(&file.checksum_sha256)
+        .bind(&file.metadata)
+        .bind(file.current_version)
+        .bind(file.is_locked)
+        .bind(file.locked_by)
+        .bind(file.locked_at)
+        .bind(file.owner_id)
+        .bind(file.updated_at)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to update file", e))?
+        .ok_or_else(|| AppError::not_found(format!("File {} not found", file.id)))
+    }
+
+    /// Increment the current version of a file.
+    pub async fn increment_version(&self, file_id: Uuid) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE files SET current_version = current_version + 1, updated_at = NOW() WHERE id = $1"
+        )
+        .bind(file_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to increment version", e))?;
+        Ok(())
+    }
+
     /// Full-text search across file names and metadata descriptions.
     pub async fn search(
         &self,
@@ -300,6 +358,23 @@ impl FileRepository {
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to create file version", e))
     }
 
+    /// Delete old file versions exceeding the retention limit per file.
+    pub async fn delete_old_versions(&self, max_versions: i64) -> AppResult<u64> {
+        let result = sqlx::query(
+            "DELETE FROM file_versions WHERE id IN (\
+                SELECT id FROM (\
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY file_id ORDER BY version_number DESC) as r_num \
+                    FROM file_versions\
+                ) t WHERE t.r_num > $1\
+             )",
+        )
+        .bind(max_versions)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to cleanup old versions", e))?;
+        Ok(result.rows_affected())
+    }
+
     // -- Chunked Uploads --
 
     /// Find a chunked upload by ID.
@@ -383,6 +458,20 @@ impl FileRepository {
         Ok(())
     }
 
+    /// Add a chunk to the uploaded_chunks list.
+    pub async fn add_uploaded_chunk(&self, upload_id: Uuid, chunk_number: i32) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE chunked_uploads SET uploaded_chunks = uploaded_chunks || $2::jsonb \
+             WHERE id = $1",
+        )
+        .bind(upload_id)
+        .bind(serde_json::json!([chunk_number]))
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to add chunk", e))?;
+        Ok(())
+    }
+
     /// Complete a chunked upload.
     pub async fn complete_chunked_upload(&self, upload_id: Uuid) -> AppResult<()> {
         sqlx::query(
@@ -404,5 +493,93 @@ impl FileRepository {
         .await
         .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to cleanup uploads", e))?;
         Ok(result.rows_affected())
+    }
+
+    /// Find all expired chunked uploads (status = uploading AND expires_at < NOW())
+    pub async fn find_expired_uploads(&self) -> AppResult<Vec<ChunkedUpload>> {
+        sqlx::query_as::<_, ChunkedUpload>(
+            "SELECT * FROM chunked_uploads WHERE status = 'uploading' AND expires_at < NOW()",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to find expired uploads", e)
+        })
+    }
+
+    /// Delete a chunked upload record by ID.
+    pub async fn delete_upload(&self, upload_id: Uuid) -> AppResult<()> {
+        sqlx::query("DELETE FROM chunked_uploads WHERE id = $1")
+            .bind(upload_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to delete upload", e)
+            })?;
+        Ok(())
+    }
+
+    /// Count total files.
+    pub async fn count_all(&self) -> AppResult<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to count files", e))?;
+        Ok(count)
+    }
+
+    /// Count files created since a specific time.
+    pub async fn count_created_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE created_at >= $1")
+            .bind(since)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to count new files", e)
+            })?;
+        Ok(count)
+    }
+
+    /// Total size of all files in bytes.
+    pub async fn total_size_bytes(&self) -> AppResult<i64> {
+        let size: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(size_bytes), 0) FROM files")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to calculate storage size", e)
+            })?;
+        Ok(size)
+    }
+
+    // -- Maintenance --
+
+    /// Rebuild search indexes (PostgreSQL specific).
+    pub async fn rebuild_search_index(&self) -> AppResult<()> {
+        // Note: REINDEX cannot be run inside a transaction block in some PG versions,
+        // but sqlx execute might handle it.
+        sqlx::query("REINDEX INDEX files_name_idx")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to rebuild index", e)
+            })?;
+        Ok(())
+    }
+
+    /// Find file records that are potentially orphaned (e.g. invalid storage_id).
+    pub async fn find_orphaned_records(&self) -> AppResult<u64> {
+        // For now, just count files with null storage_path or size 0 which might indicate issues
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM files WHERE storage_path IS NULL OR storage_path = ''",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to count orphaned records", e)
+        })?;
+        Ok(count as u64)
     }
 }

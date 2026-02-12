@@ -1,19 +1,33 @@
 [package]
 name = "plugin-cad-converter"
 version = "0.1.0"
-edition = "2021"
-description = "CAD file conversion plugin for FileHub"
+edition = "2024"
+description = "TechnoStar Jupiter-based CAD-to-VTFx conversion plugin for FileHub"
+authors = ["FileHub Team"]
 
 [dependencies]
 filehub-core = { path = "../filehub-core" }
-filehub-entity = { path = "../filehub-entity" }
 filehub-plugin = { path = "../filehub-plugin" }
 
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-thiserror = "1"
-tracing = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+validator = { workspace = true }
+
+zip = "7.4"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+tempfile = "3"
+toml = "0.9"

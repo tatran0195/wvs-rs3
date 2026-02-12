@@ -1,7 +1,7 @@
 [package]
 name = "filehub-service"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Business logic services for FileHub — orchestrates repositories, cache, storage, and auth"
 
 [dependencies]
@@ -11,6 +11,7 @@ filehub-database = { path = "../filehub-database" }
 filehub-cache = { path = "../filehub-cache" }
 filehub-storage = { path = "../filehub-storage" }
 filehub-auth = { path = "../filehub-auth" }
+filehub-plugin = { path = "../filehub-plugin" }
 
 # Async
 tokio = { workspace = true }
@@ -40,3 +41,6 @@ rand = { workspace = true }
 
 # Image processing
 image = { workspace = true }
+
+# Encoding
+base64 = { workspace = true }

@@ -51,7 +51,7 @@ pub async fn execute(args: &BroadcastArgs, config_path: &str) -> Result<(), AppE
         } => {
             let broadcast = filehub_entity::notification::model::AdminBroadcast {
                 id: uuid::Uuid::new_v4(),
-                admin_id: uuid::Uuid::nil(),
+                admin_id: uuid::Uuid::nil(), // TODO: Get actual admin ID
                 target: "all".to_string(),
                 title: title.clone(),
                 message: message.clone(),

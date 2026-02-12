@@ -1,6 +1,16 @@
 -- Storages
-CREATE TYPE IF NOT EXISTS storage_provider_type AS ENUM ('local', 's3', 'webdav', 'smb');
-CREATE TYPE IF NOT EXISTS storage_status AS ENUM ('active', 'inactive', 'error', 'syncing');
+DO $$ BEGIN
+    CREATE TYPE storage_provider_type AS ENUM ('local', 's3', 'smb');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE storage_status AS ENUM ('active', 'inactive', 'error', 'syncing');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 CREATE TABLE IF NOT EXISTS storages (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

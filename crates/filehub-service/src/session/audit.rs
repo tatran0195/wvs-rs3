@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
+use filehub_entity::audit::model::CreateAuditLogEntry;
 use uuid::Uuid;
 
 use filehub_core::error::AppError;
@@ -35,9 +35,8 @@ impl SessionAudit {
         details: Option<serde_json::Value>,
         ip_address: Option<&str>,
         user_agent: Option<&str>,
-    ) -> Result<(), AppError> {
-        let entry = AuditLogEntry {
-            id: Uuid::new_v4(),
+    ) -> Result<AuditLogEntry, AppError> {
+        let entry_record = CreateAuditLogEntry {
             actor_id,
             action: action.to_string(),
             target_type: target_type.to_string(),
@@ -45,11 +44,10 @@ impl SessionAudit {
             details,
             ip_address: ip_address.map(String::from),
             user_agent: user_agent.map(String::from),
-            created_at: Utc::now(),
         };
 
         self.audit_repo
-            .create(&entry)
+            .create(&entry_record)
             .await
             .map_err(|e| AppError::internal(format!("Failed to log audit event: {e}")))
     }
@@ -65,7 +63,7 @@ impl SessionAudit {
         page: PageRequest,
     ) -> Result<PageResponse<AuditLogEntry>, AppError> {
         self.audit_repo
-            .search(actor_id, action, target_type, target_id, page)
+            .search(actor_id, action, target_type, target_id, &page)
             .await
             .map_err(|e| AppError::internal(format!("Audit search failed: {e}")))
     }

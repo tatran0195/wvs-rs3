@@ -1,7 +1,5 @@
 //! Share link token generation and validation.
 
-use rand::Rng;
-
 /// Generates and validates share link tokens.
 #[derive(Debug, Clone)]
 pub struct LinkService;
@@ -14,8 +12,7 @@ impl LinkService {
 
     /// Generates a cryptographically secure random token for share links.
     pub fn generate_token(&self) -> String {
-        let mut rng = rand::thread_rng();
-        let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+        let bytes: Vec<u8> = (0..32).map(|_| rand::random()).collect();
         hex::encode(bytes)
     }
 }

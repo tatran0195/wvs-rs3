@@ -19,8 +19,8 @@ pub async fn health() -> Json<ApiResponse<HealthResponse>> {
 pub async fn health_detailed(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<DetailedHealthResponse>> {
-    let ws_connections = state.realtime.connections.connection_count();
-    let online_users = state.realtime.connections.user_count();
+    let ws_connections = state.realtime.connections.total_connections();
+    let online_users = state.realtime.connections.unique_users();
 
     Json(ApiResponse::ok(DetailedHealthResponse {
         status: "ok".to_string(),

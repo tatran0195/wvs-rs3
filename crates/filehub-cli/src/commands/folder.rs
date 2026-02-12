@@ -1,12 +1,12 @@
 //! Folder management CLI commands.
 
 use clap::{Args, Subcommand};
+use filehub_entity::folder::CreateFolder;
 use serde::Serialize;
 use tabled::Tabled;
 
 use crate::output::{self, OutputFormat};
 use filehub_core::error::AppError;
-use filehub_core::types::id::{FolderId, StorageId};
 use filehub_database::repositories::folder::FolderRepository;
 
 /// Arguments for folder commands
@@ -80,7 +80,7 @@ pub async fn execute(
                 .map_err(|e| AppError::bad_request(&format!("Invalid UUID: {}", e)))?;
 
             let folders = folder_repo
-                .find_root_folders(sid)
+                .find_roots(sid)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to list folders: {}", e)))?;
 
@@ -124,19 +124,16 @@ pub async fn execute(
                 (format!("/{}", name), 0)
             };
 
-            let folder = filehub_entity::folder::model::Folder {
-                id: uuid::Uuid::new_v4(),
+            let folder = CreateFolder {
                 storage_id: sid,
                 parent_id: pid,
                 name: name.clone(),
                 path,
                 depth,
                 owner_id: uuid::Uuid::nil(),
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
             };
 
-            folder_repo
+            let folder = folder_repo
                 .create(&folder)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to create folder: {}", e)))?;
@@ -148,7 +145,7 @@ pub async fn execute(
                 .map_err(|e| AppError::bad_request(&format!("Invalid UUID: {}", e)))?;
 
             let folders = folder_repo
-                .find_all_by_storage(sid)
+                .find_roots(sid)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to get folder tree: {}", e)))?;
 

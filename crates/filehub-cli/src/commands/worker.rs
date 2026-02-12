@@ -38,19 +38,19 @@ pub async fn execute(args: &WorkerArgs, config_path: &str) -> Result<(), AppErro
     match &args.command {
         WorkerCommand::Status => {
             let pending = job_repo
-                .count_by_status(filehub_entity::job::status::JobStatus::Pending)
+                .count_by_status(filehub_entity::job::JobStatus::Pending)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to count: {}", e)))?;
             let running = job_repo
-                .count_by_status(filehub_entity::job::status::JobStatus::Running)
+                .count_by_status(filehub_entity::job::JobStatus::Running)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to count: {}", e)))?;
             let failed = job_repo
-                .count_by_status(filehub_entity::job::status::JobStatus::Failed)
+                .count_by_status(filehub_entity::job::JobStatus::Failed)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to count: {}", e)))?;
             let completed = job_repo
-                .count_by_status(filehub_entity::job::status::JobStatus::Completed)
+                .count_by_status(filehub_entity::job::JobStatus::Completed)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to count: {}", e)))?;
 
@@ -66,28 +66,18 @@ pub async fn execute(args: &WorkerArgs, config_path: &str) -> Result<(), AppErro
             let payload_value: serde_json::Value = serde_json::from_str(payload)
                 .map_err(|e| AppError::bad_request(&format!("Invalid JSON payload: {}", e)))?;
 
-            let job = filehub_entity::job::model::Job {
-                id: uuid::Uuid::new_v4(),
+            let create_data = filehub_entity::job::model::CreateJob {
                 job_type: job_type.clone(),
                 queue: "default".to_string(),
-                priority: filehub_entity::job::status::JobPriority::Normal,
+                priority: filehub_entity::job::JobPriority::Normal,
                 payload: payload_value,
-                result: None,
-                error_message: None,
-                status: filehub_entity::job::status::JobStatus::Pending,
-                attempts: 0,
                 max_attempts: 3,
                 scheduled_at: None,
-                started_at: None,
-                completed_at: None,
                 created_by: None,
-                worker_id: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
             };
 
-            job_repo
-                .create(&job)
+            let job = job_repo
+                .create(&create_data)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to create job: {}", e)))?;
 

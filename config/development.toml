@@ -2,7 +2,7 @@
 port = 8080
 
 [database]
-url = "postgres://filehub:password@localhost:5432/filehub_dev"
+url = "postgres://postgres:postgres@localhost:5432/wvsrs3"
 max_connections = 10
 min_connections = 2
 
@@ -27,10 +27,6 @@ enabled = true
 concurrency = 2
 poll_interval_seconds = 10
 
-[storage.webdav_server]
-enabled = true
-port = 8081
-
 [logging]
-level = "debug"
+level = "info"
 format = "pretty"

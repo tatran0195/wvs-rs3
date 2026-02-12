@@ -1,9 +1,5 @@
 //! RBAC middleware helpers for role-based route guarding.
 
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-
 use filehub_core::error::AppError;
 use filehub_entity::user::UserRole;
 

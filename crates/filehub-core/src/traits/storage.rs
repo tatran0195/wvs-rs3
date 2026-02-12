@@ -29,7 +29,7 @@ pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> +
 
 /// Trait for file storage backends.
 ///
-/// Implementations exist for local filesystem, S3, WebDAV (client),
+/// Implementations exist for local filesystem, S3,
 /// and SMB protocols. The [`StorageProvider`] trait is defined here
 /// in `filehub-core` and implemented in `filehub-storage`.
 #[async_trait]

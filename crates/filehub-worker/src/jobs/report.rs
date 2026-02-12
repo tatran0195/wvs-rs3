@@ -84,9 +84,13 @@ impl ReportJobHandler {
             JobExecutionError::Transient(format!("Failed to get storage usage: {}", e))
         })?;
 
-        let active_sessions = self.session_repo.count_active().await.map_err(|e| {
-            JobExecutionError::Transient(format!("Failed to count sessions: {}", e))
-        })?;
+        let active_sessions = self
+            .session_repo
+            .find_active_by_user_all()
+            .await
+            .map_err(|e| {
+                JobExecutionError::Transient(format!("Failed to count sessions: {}", e))
+            })?;
 
         let audit_count = self.audit_repo.count_since(week_ago).await.map_err(|e| {
             JobExecutionError::Transient(format!("Failed to count audit entries: {}", e))
@@ -141,7 +145,7 @@ impl ReportJobHandler {
                     "used_bytes": s.used_bytes,
                     "quota_bytes": s.quota_bytes,
                     "utilization_percent": s.quota_bytes.map(|q| {
-                        if q > 0 { (s.used_bytes as f64 / q as f64) * 100.0 } else { 0.0 }
+                        if q > 0 { (s.used_bytes.unwrap_or(0) as f64 / q as f64) * 100.0 } else { 0.0 }
                     }),
                 })
             })

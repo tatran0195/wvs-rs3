@@ -55,3 +55,30 @@ impl Notification {
             .unwrap_or(false)
     }
 }
+
+/// An admin broadcast message.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AdminBroadcast {
+    /// Unique broadcast identifier.
+    pub id: Uuid,
+    /// Admin who created it.
+    pub admin_id: Uuid,
+    /// Target audience (e.g., "all", "group:admins").
+    pub target: String,
+    /// Broadcast title.
+    pub title: String,
+    /// Broadcast message.
+    pub message: String,
+    /// Severity level.
+    pub severity: String,
+    /// Whether to persist in database/history.
+    pub persistent: bool,
+    /// Optional action type (e.g., "link").
+    pub action_type: Option<String>,
+    /// Optional action payload.
+    pub action_payload: Option<serde_json::Value>,
+    /// Number of users who received it (if tracked).
+    pub delivered_count: i32,
+    /// Creation timestamp.
+    pub created_at: DateTime<Utc>,
+}

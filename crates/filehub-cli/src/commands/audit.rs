@@ -6,6 +6,7 @@ use tabled::Tabled;
 
 use crate::output::{self, OutputFormat};
 use filehub_core::error::AppError;
+use filehub_core::types::pagination::PageRequest;
 use filehub_database::repositories::audit::AuditLogRepository;
 
 /// Arguments for audit commands
@@ -81,10 +82,13 @@ pub async fn execute(
                 })
                 .transpose()?;
 
-            let entries = audit_repo
-                .search(action.as_deref(), actor_id, *limit)
+            let page = PageRequest::new(1, *limit as u64);
+            let response = audit_repo
+                .search(actor_id, action.as_deref(), None, None, &page)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to search audit: {}", e)))?;
+
+            let entries = response.items;
 
             let rows: Vec<AuditRow> = entries
                 .iter()

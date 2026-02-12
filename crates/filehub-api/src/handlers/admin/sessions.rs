@@ -2,6 +2,7 @@
 
 use axum::Json;
 use axum::extract::{Path, State};
+use filehub_realtime::message::OutboundMessage;
 use uuid::Uuid;
 
 use filehub_core::error::AppError;
@@ -102,17 +103,18 @@ pub async fn send_message(
 ) -> Result<Json<serde_json::Value>, AppError> {
     require_admin(&auth)?;
 
-    let msg = filehub_realtime::message::types::OutboundMessage::AdminBroadcast {
-        id: Uuid::new_v4(),
+    let msg = OutboundMessage::AdminBroadcast {
+        broadcast_id: Uuid::new_v4(),
         title: "Admin Message".to_string(),
         message: req.message,
         severity: "info".to_string(),
         persistent: false,
-        action: None,
+        action_payload: None,
+        action_type: None,
         timestamp: chrono::Utc::now(),
     };
 
-    state.realtime.connections.send_to_session(&id, &msg).await;
+    state.realtime.connections.send_to_connection(id, msg).await;
 
     Ok(Json(
         serde_json::json!({ "success": true, "data": { "message": "Message sent" } }),

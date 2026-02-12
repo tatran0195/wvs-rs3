@@ -6,4 +6,4 @@ pub mod model;
 
 pub use acl::{AclInheritance, AclPermission};
 pub use action::PermissionAction;
-pub use model::AclEntry;
+pub use model::{AclEntry, ResourceType};

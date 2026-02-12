@@ -94,9 +94,24 @@ CREATE INDEX IF NOT EXISTS idx_chunks_expiry ON chunked_uploads(expires_at)
     WHERE status = 'uploading';
 
 -- ACL
-CREATE TYPE IF NOT EXISTS resource_type AS ENUM ('file', 'folder', 'storage');
-CREATE TYPE IF NOT EXISTS acl_permission AS ENUM ('owner', 'editor', 'commenter', 'viewer');
-CREATE TYPE IF NOT EXISTS acl_inheritance AS ENUM ('inherit', 'block');
+DO $$ BEGIN
+    CREATE TYPE resource_type AS ENUM ('file', 'folder', 'storage');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE acl_permission AS ENUM ('owner', 'editor', 'commenter', 'viewer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE acl_inheritance AS ENUM ('inherit', 'block');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 CREATE TABLE IF NOT EXISTS acl_entries (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

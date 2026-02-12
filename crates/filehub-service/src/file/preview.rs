@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use filehub_auth::acl::EffectivePermissionResolver;
 use filehub_cache::provider::CacheManager;
-use filehub_core::error::AppError;
+use filehub_core::{error::AppError, traits::CacheProvider};
 use filehub_database::repositories::file::FileRepository;
 use filehub_entity::permission::{AclPermission, ResourceType};
 use filehub_storage::manager::StorageManager;
@@ -88,11 +88,15 @@ impl PreviewService {
         let cache_key = format!("preview:{}:{}", file_id, thumb_size);
 
         // Check cache
-        if let Ok(Some(cached)) = self.cache.get_bytes(&cache_key).await {
-            return Ok(PreviewResult {
-                data: Bytes::from(cached),
-                content_type: "image/png".to_string(),
-            });
+        if let Ok(Some(cached_b64)) = self.cache.get(&cache_key).await {
+            if let Ok(cached) =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, cached_b64)
+            {
+                return Ok(PreviewResult {
+                    data: Bytes::from(cached),
+                    content_type: "image/png".to_string(),
+                });
+            }
         }
 
         // Check if file is an image
@@ -110,17 +114,23 @@ impl PreviewService {
         // Read original file
         let original = self
             .storage
-            .read(file.storage_id, &file.storage_path)
+            .read(&file.storage_id, &file.storage_path)
             .await
             .map_err(|e| AppError::internal(format!("Storage read failed: {e}")))?;
 
         // Generate thumbnail (basic resize)
         let thumbnail = self.generate_thumbnail(&original, thumb_size)?;
 
-        // Cache thumbnail for 1 hour
+        // Cache thumbnail for 1 hour (encode as base64)
+        let thumbnail_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &thumbnail);
         let _ = self
             .cache
-            .set_bytes_with_ttl(&cache_key, &thumbnail, std::time::Duration::from_secs(3600))
+            .set(
+                &cache_key,
+                &thumbnail_b64,
+                std::time::Duration::from_secs(3600),
+            )
             .await;
 
         Ok(PreviewResult {

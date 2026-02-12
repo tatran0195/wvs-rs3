@@ -4,7 +4,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use bytes::Bytes;
 use uuid::Uuid;
 
@@ -14,7 +14,6 @@ use filehub_service::file::upload::{InitiateUploadRequest as SvcInitUpload, Simp
 use crate::dto::request::{
     CopyFileRequest, InitiateUploadRequest, MoveFileRequest, UpdateFileRequest,
 };
-use crate::dto::response::ApiResponse;
 use crate::extractors::{AuthUser, PaginationParams};
 use crate::state::AppState;
 
@@ -41,9 +40,9 @@ pub async fn list_files(
         "success": true,
         "data": {
             "items": result.items,
-            "total": result.total,
+            "total": result.total_items,
             "page": result.page,
-            "per_page": result.per_page,
+            "per_page": result.page_size,
             "total_pages": result.total_pages,
         }
     })))
@@ -139,7 +138,7 @@ pub async fn download_version(
 }
 
 /// POST /api/files/upload — simple multipart upload
-pub async fn simple_upload(
+pub async fn upload_file(
     State(state): State<AppState>,
     auth: AuthUser,
     mut multipart: Multipart,
@@ -201,7 +200,7 @@ pub async fn simple_upload(
 }
 
 /// POST /api/files/upload/initiate
-pub async fn initiate_upload(
+pub async fn initiate_chunked_upload(
     State(state): State<AppState>,
     auth: AuthUser,
     Json(req): Json<InitiateUploadRequest>,
@@ -241,7 +240,7 @@ pub async fn upload_chunk(
 }
 
 /// POST /api/files/upload/:id/complete
-pub async fn complete_upload(
+pub async fn complete_chunked_upload(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(upload_id): Path<Uuid>,

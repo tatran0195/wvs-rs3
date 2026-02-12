@@ -8,7 +8,6 @@ use chrono::{Duration, Utc};
 use serde_json::Value;
 use tracing;
 
-use filehub_core::error::AppError;
 use filehub_database::repositories::file::FileRepository;
 use filehub_database::repositories::session::SessionRepository;
 use filehub_entity::job::model::Job;
@@ -44,10 +43,11 @@ impl CleanupJobHandler {
     async fn cleanup_sessions(&self) -> Result<Value, JobExecutionError> {
         tracing::info!("Running session cleanup");
 
-        let count =
-            self.session_repo.delete_expired().await.map_err(|e| {
-                JobExecutionError::Transient(format!("Session cleanup failed: {}", e))
-            })?;
+        let count = self
+            .session_repo
+            .cleanup_expired(Utc::now())
+            .await
+            .map_err(|e| JobExecutionError::Transient(format!("Session cleanup failed: {}", e)))?;
 
         tracing::info!("Cleaned up {} expired sessions", count);
 

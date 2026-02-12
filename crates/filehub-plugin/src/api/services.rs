@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use uuid::Uuid;
 
 use filehub_cache::provider::CacheManager;
+use filehub_core::traits::CacheProvider;
 
 use super::context::PluginCacheService;
 
@@ -32,13 +32,14 @@ impl DefaultPluginCacheService {
 impl PluginCacheService for DefaultPluginCacheService {
     async fn get(&self, key: &str) -> Option<String> {
         let full_key = format!("{}{}", self.prefix, key);
-        self.cache.get::<String>(&full_key).await.ok().flatten()
+        let result: Result<Option<String>, _> = self.cache.get(&full_key).await;
+        result.ok().flatten()
     }
 
     async fn set(&self, key: &str, value: &str, ttl_seconds: u64) -> Result<(), String> {
         let full_key = format!("{}{}", self.prefix, key);
         self.cache
-            .set_with_ttl(
+            .set(
                 &full_key,
                 value,
                 std::time::Duration::from_secs(ttl_seconds),

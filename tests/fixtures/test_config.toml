@@ -84,11 +84,6 @@ bucket = ""
 access_key = ""
 secret_key = ""
 
-[storage.webdav_server]
-enabled = false
-port = 0
-auth_realm = "FileHub Test"
-
 [license]
 enabled = false
 provider = "flexnet"

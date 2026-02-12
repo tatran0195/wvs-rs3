@@ -4,12 +4,11 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use tracing::info;
-use uuid::Uuid;
 
 use filehub_auth::password::{PasswordHasher, PasswordValidator};
 use filehub_core::error::AppError;
 use filehub_database::repositories::user::UserRepository;
-use filehub_entity::user::User;
+use filehub_entity::user::{User, model::UpdateUser};
 
 use crate::context::RequestContext;
 
@@ -92,9 +91,15 @@ impl UserService {
         }
 
         user.updated_at = Utc::now();
+        let updated_user = UpdateUser {
+            id: user.id,
+            display_name: user.display_name,
+            email: user.email,
+        };
 
-        self.user_repo
-            .update(&user)
+        let user = self
+            .user_repo
+            .update(&updated_user)
             .await
             .map_err(|e| AppError::internal(format!("Failed to update profile: {e}")))?;
 

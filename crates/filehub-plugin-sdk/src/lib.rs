@@ -1,6 +1,6 @@
 //! # filehub-plugin-sdk
 //!
-//! SDK for developing plugins for Suzuki FileHub.
+//! SDK for developing plugins for FileHub.
 //!
 //! ## Quick Start
 //!

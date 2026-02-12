@@ -28,19 +28,31 @@ impl LicenseCheckoutRepository {
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to find checkout", e))
     }
 
-    /// Find active checkout by session.
+    /// Find active checkouts by session.
     pub async fn find_active_by_session(
         &self,
         session_id: Uuid,
-    ) -> AppResult<Option<LicenseCheckout>> {
+    ) -> AppResult<Vec<LicenseCheckout>> {
         sqlx::query_as::<_, LicenseCheckout>(
             "SELECT * FROM license_checkouts WHERE session_id = $1 AND is_active = TRUE",
         )
         .bind(session_id)
-        .fetch_optional(&self.pool)
+        .fetch_all(&self.pool)
         .await
         .map_err(|e| {
-            AppError::with_source(ErrorKind::Database, "Failed to find session checkout", e)
+            AppError::with_source(ErrorKind::Database, "Failed to find session checkouts", e)
+        })
+    }
+
+    /// Find all active checkouts.
+    pub async fn find_all_active(&self) -> AppResult<Vec<LicenseCheckout>> {
+        sqlx::query_as::<_, LicenseCheckout>(
+            "SELECT * FROM license_checkouts WHERE is_active = TRUE",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to find active checkouts", e)
         })
     }
 

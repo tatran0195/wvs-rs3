@@ -9,7 +9,6 @@ members = [
     "crates/filehub-auth",
     "crates/filehub-service",
     "crates/filehub-realtime",
-    "crates/filehub-webdav",
     "crates/filehub-worker",
     "crates/filehub-plugin",
     "crates/filehub-plugin-sdk",
@@ -22,7 +21,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-authors = ["Suzuki FileHub Team"]
+authors = ["FileHub Team"]
 
 [workspace.dependencies]
 # Async runtime
@@ -62,18 +61,15 @@ rand = "0.10"
 # Cache
 redis = { version = "1", features = ["tokio-comp", "connection-manager"] }
 moka = { version = "0.12", features = ["future"] }
-dashmap = "6"
+dashmap = "6.1"
 
 # Storage
-aws-sdk-s3 = "1"
+aws-sdk-s3 = "1.122"
 aws-config = "1"
 reqwest = { version = "0.13", features = ["json", "stream"] }
 
 # WebSocket
 tokio-tungstenite = "0.28"
-
-# WebDAV
-dav-server = "0.10"
 
 # Worker
 tokio-cron-scheduler = "0.15"
@@ -86,7 +82,7 @@ clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 
 # Types
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 bytes = "1"
 futures = "0.3"
@@ -108,12 +104,18 @@ config = "0.15"
 # Image processing
 image = "0.25"
 
+# Encoding
+base64 = "0.22"
+
 # Validation
 validator = { version = "0.20", features = ["derive"] }
 
 # Streaming
 tokio-util = { version = "0.7", features = ["io", "codec"] }
 pin-project-lite = "0.2"
+
+# Password
+zxcvbn = "3.1"
 
 # Internal crates
 filehub-core = { path = "crates/filehub-core" }
@@ -124,7 +126,6 @@ filehub-storage = { path = "crates/filehub-storage" }
 filehub-auth = { path = "crates/filehub-auth" }
 filehub-service = { path = "crates/filehub-service" }
 filehub-realtime = { path = "crates/filehub-realtime" }
-filehub-webdav = { path = "crates/filehub-webdav" }
 filehub-worker = { path = "crates/filehub-worker" }
 filehub-plugin = { path = "crates/filehub-plugin" }
 filehub-plugin-sdk = { path = "crates/filehub-plugin-sdk" }
@@ -148,3 +149,16 @@ filehub-api.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+filehub-database.workspace = true
+filehub-cache.workspace = true
+filehub-storage.workspace = true
+filehub-auth.workspace = true
+filehub-service.workspace = true
+filehub-realtime.workspace = true
+filehub-worker.workspace = true
+filehub-plugin.workspace = true
+plugin-flexnet.workspace = true
+plugin-cad-converter.workspace = true
+uuid.workspace = true
+axum.workspace = true
+sqlx.workspace = true

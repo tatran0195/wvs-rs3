@@ -37,6 +37,12 @@ pub struct LicensePoolConfig {
     /// Critical threshold as a percentage of pool capacity.
     #[serde(default = "default_critical_threshold")]
     pub critical_threshold_percent: u8,
+    /// Whether to reserve seats for admins.
+    #[serde(default)]
+    pub admin_reserved_enabled: bool,
+    /// Number of seats to reserve for admins.
+    #[serde(default = "default_admin_reserved_seats")]
+    pub admin_reserved_seats: u32,
 }
 
 impl Default for LicensePoolConfig {
@@ -46,8 +52,14 @@ impl Default for LicensePoolConfig {
             refresh_interval_seconds: default_refresh_interval(),
             warning_threshold_percent: default_warning_threshold(),
             critical_threshold_percent: default_critical_threshold(),
+            admin_reserved_enabled: false,
+            admin_reserved_seats: default_admin_reserved_seats(),
         }
     }
+}
+
+fn default_admin_reserved_seats() -> u32 {
+    2
 }
 
 fn default_provider() -> String {

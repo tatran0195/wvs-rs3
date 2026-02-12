@@ -1,16 +1,16 @@
 //! Admin user management commands.
 
 use clap::{Args, Subcommand};
-use uuid::Uuid;
+use sqlx::PgPool;
+
+use filehub_auth::password::hasher::PasswordHasher;
+use filehub_core::error::AppError;
+use filehub_database::repositories::user::UserRepository;
+use filehub_entity::user::model::CreateUser;
+use filehub_entity::user::role::UserRole;
 
 use crate::output;
 use crate::output::OutputFormat;
-use filehub_auth::password::hasher::PasswordHasher;
-use filehub_core::error::AppError;
-use filehub_core::types::id::UserId;
-use filehub_database::repositories::user::UserRepository;
-use filehub_entity::user::role::UserRole;
-use filehub_entity::user::status::UserStatus;
 
 /// Arguments for admin commands
 #[derive(Debug, Args)]
@@ -53,9 +53,9 @@ pub async fn execute(
     format: OutputFormat,
 ) -> Result<(), AppError> {
     let config = super::load_config(config_path).await?;
-    let pool = super::create_db_pool(&config).await?;
+    let pool: PgPool = super::create_db_pool(&config).await?;
     let user_repo = UserRepository::new(pool.clone());
-    let hasher = PasswordHasher::new(&config.auth);
+    let hasher = PasswordHasher::new();
 
     match &args.command {
         AdminCommand::Create {
@@ -93,27 +93,20 @@ pub async fn execute(
             };
 
             let password_hash = hasher
-                .hash(&password)
+                .hash_password(&password)
                 .map_err(|e| AppError::internal(format!("Failed to hash password: {}", e)))?;
 
-            let user = filehub_entity::user::model::User {
-                id: Uuid::new_v4(),
+            let create_user = CreateUser {
                 username: username.clone(),
                 email,
                 password_hash,
                 display_name: Some(username.clone()),
                 role: UserRole::Admin,
-                status: UserStatus::Active,
-                failed_login_attempts: 0,
-                locked_until: None,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-                last_login_at: None,
                 created_by: None,
             };
 
-            user_repo
-                .create(&user)
+            let user = user_repo
+                .create(&create_user)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to create admin: {}", e)))?;
 
@@ -139,7 +132,7 @@ pub async fn execute(
             };
 
             let password_hash = hasher
-                .hash(&password)
+                .hash_password(&password)
                 .map_err(|e| AppError::internal(format!("Failed to hash password: {}", e)))?;
 
             user_repo

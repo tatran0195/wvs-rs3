@@ -1,6 +1,6 @@
 //! # filehub-core
 //!
-//! Core crate for Suzuki FileHub. Contains traits, configuration schemas,
+//! Core crate for FileHub. Contains traits, configuration schemas,
 //! typed identifiers, domain events, pagination/sorting/filter types,
 //! and the unified error system.
 //!

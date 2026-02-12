@@ -58,13 +58,13 @@ impl TransferService {
         // Read from source
         let data = self
             .storage
-            .read(req.source_storage_id, &req.source_path)
+            .read(&req.source_storage_id, &req.source_path)
             .await
             .map_err(|e| AppError::internal(format!("Failed to read from source: {e}")))?;
 
         // Write to target
         self.storage
-            .write(req.target_storage_id, &req.target_path, data)
+            .write(&req.target_storage_id, &req.target_path, data)
             .await
             .map_err(|e| AppError::internal(format!("Failed to write to target: {e}")))?;
 

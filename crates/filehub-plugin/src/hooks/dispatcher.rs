@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 
 use filehub_core::error::AppError;
 
-use super::definitions::{HookAction, HookPayload, HookPoint, HookResult};
+use super::definitions::{HookAction, HookPayload, HookResult};
 use super::registry::HookRegistry;
 
 /// Aggregated result of dispatching a hook to all handlers.

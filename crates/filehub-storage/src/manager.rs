@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -60,6 +61,24 @@ impl StorageManager {
             .get(storage_id)
             .cloned()
             .ok_or_else(|| AppError::not_found(format!("Storage provider {storage_id} not found")))
+    }
+
+    /// Read a file from storage.
+    pub async fn read(&self, storage_id: &Uuid, path: &str) -> AppResult<Bytes> {
+        let provider = self.get(storage_id).await?;
+        provider.read_bytes(path).await
+    }
+
+    /// Write a file to storage.
+    pub async fn write(&self, storage_id: &Uuid, path: &str, data: Bytes) -> AppResult<()> {
+        let provider = self.get(storage_id).await?;
+        provider.write(path, data).await
+    }
+
+    /// Delete a file from storage.
+    pub async fn delete(&self, storage_id: &Uuid, path: &str) -> AppResult<()> {
+        let provider = self.get(storage_id).await?;
+        provider.delete(path).await
     }
 
     /// Get the default storage provider.

@@ -145,7 +145,22 @@ impl AclRepository {
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to create ACL entry", e))
     }
 
-    /// Update an ACL entry's permission.
+    /// Update an ACL entry.
+    pub async fn update(&self, entry: &AclEntry) -> AppResult<AclEntry> {
+        sqlx::query_as::<_, AclEntry>(
+            "UPDATE acl_entries SET permission = $2, inheritance = $3, expires_at = $4 WHERE id = $1 RETURNING *"
+        )
+        .bind(entry.id)
+        .bind(&entry.permission)
+        .bind(&entry.inheritance)
+        .bind(entry.expires_at)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to update ACL entry", e))?
+        .ok_or_else(|| AppError::not_found(format!("ACL entry {} not found", entry.id)))
+    }
+
+    /// Update an ACL entry's permission (legacy).
     pub async fn update_permission(
         &self,
         entry_id: Uuid,
@@ -190,5 +205,58 @@ impl AclRepository {
                     AppError::with_source(ErrorKind::Database, "Failed to delete ACL entries", e)
                 })?;
         Ok(result.rows_affected())
+    }
+
+    /// Find ACL entries for a specific user on a resource.
+    pub async fn find_for_user(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+        user_id: Uuid,
+    ) -> AppResult<Vec<AclEntry>> {
+        sqlx::query_as::<_, AclEntry>(
+            "SELECT * FROM acl_entries \
+             WHERE resource_type = $1 AND resource_id = $2 AND user_id = $3 \
+             AND (expires_at IS NULL OR expires_at > NOW()) \
+             ORDER BY created_at ASC",
+        )
+        .bind(&resource_type)
+        .bind(resource_id)
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to find user ACL entries", e)
+        })
+    }
+
+    /// Find all ACL entries for a resource (alias for find_by_resource).
+    pub async fn find_for_resource(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+    ) -> AppResult<Vec<AclEntry>> {
+        self.find_by_resource(resource_type, resource_id).await
+    }
+
+    /// Find public (is_anyone = true) ACL entries for a resource.
+    pub async fn find_public_entries(
+        &self,
+        resource_type: ResourceType,
+        resource_id: Uuid,
+    ) -> AppResult<Vec<AclEntry>> {
+        sqlx::query_as::<_, AclEntry>(
+            "SELECT * FROM acl_entries \
+             WHERE resource_type = $1 AND resource_id = $2 AND is_anyone = TRUE \
+             AND (expires_at IS NULL OR expires_at > NOW()) \
+             ORDER BY created_at ASC",
+        )
+        .bind(&resource_type)
+        .bind(resource_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to find public ACL entries", e)
+        })
     }
 }

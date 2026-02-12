@@ -145,6 +145,34 @@ impl UserRepository {
         ))
     }
 
+    /// List all users, optionally filtered by role (unpaginated).
+    pub async fn find_all_filtered(&self, role: Option<&str>) -> AppResult<Vec<User>> {
+        let mut query = "SELECT * FROM users".to_string();
+
+        if let Some(role_str) = role {
+            // Validate role
+            use std::str::FromStr;
+            let _ = UserRole::from_str(role_str)?;
+
+            query.push_str(" WHERE role = $1 ORDER BY created_at DESC");
+            sqlx::query_as::<_, User>(&query)
+                .bind(role_str.to_lowercase())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(ErrorKind::Database, "Failed to list filtered users", e)
+                })
+        } else {
+            query.push_str(" ORDER BY created_at DESC");
+            sqlx::query_as::<_, User>(&query)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(ErrorKind::Database, "Failed to list all users", e)
+                })
+        }
+    }
+
     /// Search users by username or display name.
     pub async fn search(&self, query: &str, page: &PageRequest) -> AppResult<PageResponse<User>> {
         let pattern = format!("%{query}%");
@@ -335,11 +363,23 @@ impl UserRepository {
     }
 
     /// Count total users.
-    pub async fn count(&self) -> AppResult<u64> {
+    pub async fn count_all(&self) -> AppResult<i64> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
             .fetch_one(&self.pool)
             .await
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to count users", e))?;
-        Ok(count as u64)
+        Ok(count)
+    }
+
+    /// Count users created since a specific time.
+    pub async fn count_created_since(&self, since: DateTime<Utc>) -> AppResult<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE created_at >= $1")
+            .bind(since)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to count new users", e)
+            })?;
+        Ok(count)
     }
 }

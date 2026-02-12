@@ -29,10 +29,10 @@ impl ConnectionPool {
 
     /// Add a connection to the pool
     pub fn add(&self, handle: Arc<ConnectionHandle>) {
-        let user_id = *handle.user_id;
+        let user_id = handle.user_id;
         self.by_id.insert(handle.id, Arc::clone(&handle));
         self.by_user
-            .entry(user_id)
+            .entry(user_id.into_uuid())
             .or_insert_with(Vec::new)
             .push(handle);
     }
@@ -40,13 +40,13 @@ impl ConnectionPool {
     /// Remove a connection by ID
     pub fn remove(&self, connection_id: ConnectionId) -> Option<Arc<ConnectionHandle>> {
         let handle = self.by_id.remove(&connection_id).map(|(_, h)| h)?;
-        let user_id = *handle.user_id;
+        let user_id = handle.user_id;
 
-        if let Some(mut conns) = self.by_user.get_mut(&user_id) {
+        if let Some(mut conns) = self.by_user.get_mut(&user_id.into_uuid()) {
             conns.retain(|c| c.id != connection_id);
             if conns.is_empty() {
                 drop(conns);
-                self.by_user.remove(&user_id);
+                self.by_user.remove(&user_id.into_uuid());
             }
         }
 
@@ -56,7 +56,7 @@ impl ConnectionPool {
     /// Get all connections for a user
     pub fn get_user_connections(&self, user_id: UserId) -> Vec<Arc<ConnectionHandle>> {
         self.by_user
-            .get(&*user_id)
+            .get(&user_id.into_uuid())
             .map(|conns| conns.clone())
             .unwrap_or_default()
     }
@@ -69,7 +69,7 @@ impl ConnectionPool {
     /// Count connections for a user
     pub fn user_connection_count(&self, user_id: UserId) -> usize {
         self.by_user
-            .get(&*user_id)
+            .get(&user_id.into_uuid())
             .map(|conns| conns.len())
             .unwrap_or(0)
     }

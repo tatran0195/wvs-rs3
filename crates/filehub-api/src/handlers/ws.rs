@@ -3,12 +3,12 @@
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::response::Response;
-use futures::{SinkExt, StreamExt};
-use tracing::{error, info, warn};
-
-use filehub_auth::jwt::JwtDecoder;
-use filehub_core::error::AppError;
 use filehub_realtime::connection::authenticator::WsAuthenticator;
+use filehub_realtime::message::OutboundMessage;
+use futures::{SinkExt, StreamExt};
+use tracing::{info, warn};
+
+use filehub_core::error::AppError;
 
 use crate::state::AppState;
 
@@ -35,18 +35,26 @@ pub async fn ws_handler(
 /// Handles an established WebSocket connection.
 async fn handle_ws_connection(
     state: AppState,
-    auth: filehub_realtime::connection::authenticator::AuthenticatedConnection,
+    auth: filehub_realtime::connection::authenticator::WsAuthUser,
     socket: WebSocket,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<OutboundMessage>(100);
 
     // Register connection
-    let (handle, mut outbound_rx) = state.realtime.connections.register(
+    let handle = match state.realtime.connections.register(
         auth.user_id,
         auth.session_id,
         auth.role.clone(),
         auth.username.clone(),
-    );
+        tx,
+    ) {
+        Some(h) => h,
+        None => {
+            warn!(user_id = %auth.user_id, "Connection limit reached, rejecting");
+            return;
+        }
+    };
 
     let conn_id = handle.id;
 
@@ -58,9 +66,16 @@ async fn handle_ws_connection(
 
     // Spawn outbound message forwarder
     let outbound_task = tokio::spawn(async move {
-        while let Some(msg) = outbound_rx.recv().await {
-            if ws_tx.send(Message::Text(msg)).await.is_err() {
-                break;
+        while let Some(msg) = rx.recv().await {
+            match serde_json::to_string(&msg) {
+                Ok(text) => {
+                    if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to serialize outbound message");
+                }
             }
         }
     });
@@ -78,7 +93,7 @@ async fn handle_ws_connection(
             Ok(Message::Close(_)) => {
                 break;
             }
-            Ok(Message::Ping(data)) => {
+            Ok(Message::Ping(_)) => {
                 // Ping is handled by axum automatically
             }
             Ok(_) => {}
@@ -91,7 +106,7 @@ async fn handle_ws_connection(
 
     // Cleanup
     outbound_task.abort();
-    state.realtime.connections.unregister(&conn_id);
+    state.realtime.connections.unregister(conn_id);
 
     info!(
         conn_id = %conn_id,

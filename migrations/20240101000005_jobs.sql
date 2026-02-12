@@ -1,8 +1,18 @@
 -- Jobs
-CREATE TYPE IF NOT EXISTS job_status AS ENUM (
-    'pending', 'queued', 'running', 'completed', 'failed', 'cancelled'
-);
-CREATE TYPE IF NOT EXISTS job_priority AS ENUM ('low', 'normal', 'high', 'critical');
+DO $$ BEGIN
+    CREATE TYPE job_status AS ENUM (
+        'pending', 'queued', 'running', 'completed', 'failed', 'cancelled'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE job_priority AS ENUM ('low', 'normal', 'high', 'critical');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 CREATE TABLE IF NOT EXISTS jobs (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

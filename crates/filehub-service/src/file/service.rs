@@ -12,7 +12,7 @@ use filehub_core::error::AppError;
 use filehub_core::types::pagination::{PageRequest, PageResponse};
 use filehub_database::repositories::file::FileRepository;
 use filehub_database::repositories::folder::FolderRepository;
-use filehub_entity::file::File;
+use filehub_entity::file::{CreateFile, File};
 use filehub_entity::permission::{AclPermission, ResourceType};
 
 use crate::context::RequestContext;
@@ -98,7 +98,7 @@ impl FileService {
             .await?;
 
         self.file_repo
-            .find_by_folder(folder_id, page)
+            .find_by_folder(folder_id, &page)
             .await
             .map_err(|e| AppError::internal(format!("Failed to list files: {e}")))
     }
@@ -158,9 +158,7 @@ impl FileService {
             file.name = name;
         }
 
-        if let Some(metadata) = req.metadata {
-            file.metadata = metadata;
-        }
+        file.metadata = req.metadata;
 
         file.updated_at = Utc::now();
 
@@ -287,9 +285,7 @@ impl FileService {
             )));
         }
 
-        let now = Utc::now();
-        let new_file = File {
-            id: Uuid::new_v4(),
+        let new_file = CreateFile {
             folder_id: req.target_folder_id,
             storage_id: target.storage_id,
             name: new_name,
@@ -298,19 +294,10 @@ impl FileService {
             size_bytes: source.size_bytes,
             checksum_sha256: source.checksum_sha256.clone(),
             metadata: source.metadata.clone(),
-            current_version: 1,
-            is_locked: false,
-            locked_by: None,
-            locked_at: None,
             owner_id: ctx.user_id,
-            created_at: now,
-            updated_at: now,
         };
 
-        self.file_repo
-            .create(&new_file)
-            .await
-            .map_err(|e| AppError::internal(format!("Failed to copy file: {e}")))?;
+        let new_file = self.file_repo.create(&new_file).await?;
 
         info!(
             user_id = %ctx.user_id,
@@ -328,7 +315,8 @@ impl FileService {
             .get_file_with_permission(ctx, file_id, AclPermission::Editor)
             .await?;
 
-        if file.is_locked && file.locked_by != Some(ctx.user_id) && !ctx.is_admin() {
+        if file.is_locked.unwrap_or(false) && file.locked_by != Some(ctx.user_id) && !ctx.is_admin()
+        {
             return Err(AppError::conflict("File is locked by another user"));
         }
 
@@ -348,14 +336,14 @@ impl FileService {
             .get_file_with_permission(ctx, file_id, AclPermission::Editor)
             .await?;
 
-        if file.is_locked {
+        if file.is_locked.unwrap_or(false) {
             if file.locked_by == Some(ctx.user_id) {
                 return Ok(file); // Already locked by this user
             }
             return Err(AppError::conflict("File is already locked by another user"));
         }
 
-        file.is_locked = true;
+        file.is_locked = Some(true);
         file.locked_by = Some(ctx.user_id);
         file.locked_at = Some(Utc::now());
         file.updated_at = Utc::now();
@@ -374,7 +362,7 @@ impl FileService {
     pub async fn unlock_file(&self, ctx: &RequestContext, file_id: Uuid) -> Result<File, AppError> {
         let mut file = self.get_file(ctx, file_id).await?;
 
-        if !file.is_locked {
+        if !file.is_locked.unwrap_or(false) {
             return Ok(file);
         }
 
@@ -384,7 +372,7 @@ impl FileService {
             ));
         }
 
-        file.is_locked = false;
+        file.is_locked = Some(false);
         file.locked_by = None;
         file.locked_at = None;
         file.updated_at = Utc::now();

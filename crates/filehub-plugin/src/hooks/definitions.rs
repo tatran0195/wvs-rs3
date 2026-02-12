@@ -199,6 +199,26 @@ impl HookPayload {
         self
     }
 
+    /// Inserts a string value.
+    pub fn with_string(self, key: &str, value: &str) -> Self {
+        self.with_data(key, serde_json::json!(value))
+    }
+
+    /// Inserts a UUID value.
+    pub fn with_uuid(self, key: &str, value: Uuid) -> Self {
+        self.with_data(key, serde_json::json!(value))
+    }
+
+    /// Inserts an integer value.
+    pub fn with_int(self, key: &str, value: i64) -> Self {
+        self.with_data(key, serde_json::json!(value))
+    }
+
+    /// Inserts a boolean value.
+    pub fn with_bool(self, key: &str, value: bool) -> Self {
+        self.with_data(key, serde_json::json!(value))
+    }
+
     /// Gets a data value by key.
     pub fn get_data(&self, key: &str) -> Option<&serde_json::Value> {
         self.data.get(key)

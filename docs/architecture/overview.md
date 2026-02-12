@@ -9,7 +9,7 @@ clean architecture principles (domain-driven design).
 
 ┌─────────────────────────────────────────┐
 │ Presentation Layer │
-│ filehub-api, filehub-cli, filehub-webdav│
+│ filehub-api, filehub-cli │
 ├─────────────────────────────────────────┤
 │ Application Layer │
 │ filehub-service, filehub-worker │
@@ -28,7 +28,7 @@ clean architecture principles (domain-driven design).
 1. **Trait-based abstractions** — Core traits defined in `filehub-core`, implemented in infrastructure crates
 2. **Newtype IDs** — All entity IDs use newtype wrappers around `uuid::Uuid`
 3. **Event-driven** — Domain events flow through the plugin hook system
-4. **Multi-storage** — Pluggable storage backends (local, S3, WebDAV, SMB)
+4. **Multi-storage** — Pluggable storage backends (local, S3, SMB)
 5. **Seat-based licensing** — FlexNet integration with atomic seat allocation
 6. **Real-time** — WebSocket engine with typed channels and presence tracking
 

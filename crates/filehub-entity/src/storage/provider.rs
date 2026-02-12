@@ -13,8 +13,6 @@ pub enum StorageProviderType {
     Local,
     /// S3-compatible object storage.
     S3,
-    /// WebDAV remote storage.
-    Webdav,
     /// SMB/CIFS network share.
     Smb,
 }
@@ -25,7 +23,6 @@ impl StorageProviderType {
         match self {
             Self::Local => "local",
             Self::S3 => "s3",
-            Self::Webdav => "webdav",
             Self::Smb => "smb",
         }
     }
@@ -44,10 +41,9 @@ impl FromStr for StorageProviderType {
         match s.to_lowercase().as_str() {
             "local" => Ok(Self::Local),
             "s3" => Ok(Self::S3),
-            "webdav" => Ok(Self::Webdav),
             "smb" => Ok(Self::Smb),
             _ => Err(filehub_core::AppError::validation(format!(
-                "Invalid storage provider type: '{s}'. Expected one of: local, s3, webdav, smb"
+                "Invalid storage provider type: '{s}'. Expected one of: local, s3, smb"
             ))),
         }
     }

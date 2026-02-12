@@ -2,13 +2,12 @@
 name = "filehub-storage"
 version.workspace = true
 edition.workspace = true
-description = "Storage providers (Local, S3, WebDAV, SMB) for FileHub"
+description = "Storage providers (Local, S3, SMB) for FileHub"
 
 [features]
 default = ["local"]
 local = []
 s3 = ["dep:aws-sdk-s3", "dep:aws-config"]
-webdav-client = ["dep:reqwest"]
 smb = []
 
 [dependencies]

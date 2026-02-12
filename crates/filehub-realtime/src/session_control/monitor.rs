@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use filehub_core::types::id::SessionId;
 use filehub_database::repositories::session::SessionRepository;
 
 use crate::connection::handle::ConnectionInfo;

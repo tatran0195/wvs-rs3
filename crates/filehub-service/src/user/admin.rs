@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -79,7 +78,7 @@ impl AdminUserService {
             .require_permission(&ctx.role, &SystemPermission::UserRead)?;
 
         self.user_repo
-            .find_all_paginated(page)
+            .find_all(&page)
             .await
             .map_err(|e| AppError::internal(format!("Failed to list users: {e}")))
     }
@@ -139,25 +138,18 @@ impl AdminUserService {
         self.validator.validate(&req.password)?;
         let password_hash = self.hasher.hash_password(&req.password)?;
 
-        let now = Utc::now();
-        let user = User {
-            id: Uuid::new_v4(),
+        let create_data = filehub_entity::user::model::CreateUser {
             username: req.username.clone(),
             email: req.email,
             password_hash,
             display_name: req.display_name,
             role: req.role.clone(),
-            status: UserStatus::Active,
-            failed_login_attempts: 0,
-            locked_until: None,
-            created_at: now,
-            updated_at: now,
-            last_login_at: None,
             created_by: Some(ctx.user_id),
         };
 
-        self.user_repo
-            .create(&user)
+        let user = self
+            .user_repo
+            .create(&create_data)
             .await
             .map_err(|e| AppError::internal(format!("Failed to create user: {e}")))?;
 
@@ -182,16 +174,10 @@ impl AdminUserService {
         self.rbac
             .require_permission(&ctx.role, &SystemPermission::UserUpdate)?;
 
-        let mut user = self.get_user(ctx, user_id).await?;
-
-        if let Some(display_name) = req.display_name {
-            user.display_name = Some(display_name);
-        }
-
-        if let Some(email) = req.email {
+        if let Some(ref email) = req.email {
             if let Some(existing) = self
                 .user_repo
-                .find_by_email(&email)
+                .find_by_email(email)
                 .await
                 .map_err(|e| AppError::internal(format!("Database error: {e}")))?
             {
@@ -199,13 +185,17 @@ impl AdminUserService {
                     return Err(AppError::conflict("Email is already in use"));
                 }
             }
-            user.email = Some(email);
         }
 
-        user.updated_at = Utc::now();
+        let update_data = filehub_entity::user::model::UpdateUser {
+            id: user_id,
+            email: req.email,
+            display_name: req.display_name,
+        };
 
-        self.user_repo
-            .update(&user)
+        let user = self
+            .user_repo
+            .update(&update_data)
             .await
             .map_err(|e| AppError::internal(format!("Failed to update user: {e}")))?;
 
@@ -228,21 +218,16 @@ impl AdminUserService {
             return Err(AppError::forbidden("Cannot change your own role"));
         }
 
-        let mut user = self.get_user(ctx, user_id).await?;
-        let old_role = user.role.clone();
-        user.role = new_role.clone();
-        user.updated_at = Utc::now();
-
-        self.user_repo
-            .update(&user)
+        let user = self
+            .user_repo
+            .update_role(user_id, new_role.clone())
             .await
             .map_err(|e| AppError::internal(format!("Failed to change role: {e}")))?;
 
         info!(
             admin_id = %ctx.user_id,
             target_id = %user_id,
-            old_role = %old_role,
-            new_role = %new_role,
+            role = %new_role,
             "User role changed"
         );
 
@@ -263,17 +248,16 @@ impl AdminUserService {
             return Err(AppError::forbidden("Cannot change your own status"));
         }
 
-        let mut user = self.get_user(ctx, user_id).await?;
-        user.status = new_status.clone();
-        user.updated_at = Utc::now();
-
         if new_status == UserStatus::Active {
-            user.failed_login_attempts = 0;
-            user.locked_until = None;
+            self.user_repo
+                .reset_failed_attempts(user_id)
+                .await
+                .map_err(|e| AppError::internal(format!("Failed to reset attempts: {e}")))?;
         }
 
-        self.user_repo
-            .update(&user)
+        let user = self
+            .user_repo
+            .update_status(user_id, new_status.clone())
             .await
             .map_err(|e| AppError::internal(format!("Failed to change status: {e}")))?;
 

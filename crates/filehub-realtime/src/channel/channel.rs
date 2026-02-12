@@ -1,12 +1,8 @@
 //! Individual channel with subscriber tracking.
 
-use std::sync::Arc;
-
 use dashmap::DashSet;
-use uuid::Uuid;
 
 use crate::connection::handle::ConnectionId;
-use crate::message::types::OutboundMessage;
 
 use super::types::ChannelType;
 

@@ -12,8 +12,10 @@ use filehub_core::config::StorageConfig;
 use filehub_core::error::AppError;
 use filehub_database::repositories::file::FileRepository;
 use filehub_database::repositories::folder::FolderRepository;
-use filehub_entity::file::{ChunkedUpload, File};
+use filehub_entity::file::{CreateFile, File};
 use filehub_entity::permission::{AclPermission, ResourceType};
+use filehub_plugin::hooks::definitions::{HookPayload, HookPoint};
+use filehub_plugin::manager::PluginManager;
 use filehub_storage::manager::StorageManager;
 
 use crate::context::RequestContext;
@@ -31,6 +33,8 @@ pub struct UploadService {
     perm_resolver: Arc<EffectivePermissionResolver>,
     /// Storage configuration.
     config: StorageConfig,
+    /// Plugin manager for firing hooks.
+    plugin_manager: Arc<PluginManager>,
 }
 
 impl std::fmt::Debug for UploadService {
@@ -86,6 +90,7 @@ impl UploadService {
         storage: Arc<StorageManager>,
         perm_resolver: Arc<EffectivePermissionResolver>,
         config: StorageConfig,
+        plugin_manager: Arc<PluginManager>,
     ) -> Self {
         Self {
             file_repo,
@@ -93,6 +98,7 @@ impl UploadService {
             storage,
             perm_resolver,
             config,
+            plugin_manager,
         }
     }
 
@@ -149,14 +155,12 @@ impl UploadService {
         let storage_path = format!("{}/{}/{}", folder.path, file_id, params.file_name);
 
         self.storage
-            .write(folder.storage_id, &storage_path, params.data.clone())
+            .write(&folder.storage_id, &storage_path, params.data.clone())
             .await
             .map_err(|e| AppError::internal(format!("Storage write failed: {e}")))?;
 
         // Create file record
-        let now = Utc::now();
-        let file = File {
-            id: file_id,
+        let file_record = CreateFile {
             folder_id: params.folder_id,
             storage_id: folder.storage_id,
             name: params.file_name,
@@ -164,18 +168,13 @@ impl UploadService {
             mime_type: params.mime_type,
             size_bytes: params.data.len() as i64,
             checksum_sha256: None,
-            metadata: serde_json::json!({}),
-            current_version: 1,
-            is_locked: false,
-            locked_by: None,
-            locked_at: None,
+            metadata: Some(serde_json::json!({})),
             owner_id: ctx.user_id,
-            created_at: now,
-            updated_at: now,
         };
 
-        self.file_repo
-            .create(&file)
+        let file = self
+            .file_repo
+            .create(&file_record)
             .await
             .map_err(|e| AppError::internal(format!("Failed to create file record: {e}")))?;
 
@@ -186,6 +185,24 @@ impl UploadService {
             size = file.size_bytes,
             "Simple upload completed"
         );
+
+        // Fire AfterUpload hook
+        let mut payload = HookPayload::new(HookPoint::AfterUpload)
+            .with_uuid("file_id", file.id)
+            .with_uuid("folder_id", file.folder_id)
+            .with_uuid("owner_id", file.owner_id)
+            .with_string("name", &file.name)
+            .with_string("storage_path", &file.storage_path)
+            .with_int("size_bytes", file.size_bytes);
+
+        if let Some(mime) = &file.mime_type {
+            payload = payload.with_string("mime_type", mime);
+        }
+
+        self.plugin_manager
+            .dispatcher()
+            .fire_and_forget(&payload)
+            .await;
 
         Ok(file)
     }
@@ -233,27 +250,20 @@ impl UploadService {
         let now = Utc::now();
         let expires_at = now + chrono::Duration::hours(24);
 
-        let upload = ChunkedUpload {
-            id: upload_id,
-            user_id: ctx.user_id,
-            storage_id: folder.storage_id,
-            target_folder_id: req.folder_id,
-            file_name: req.file_name,
-            file_size: req.file_size,
-            mime_type: req.mime_type,
-            chunk_size: chunk_size as i32,
-            total_chunks,
-            uploaded_chunks: serde_json::json!([]),
-            checksum_sha256: req.checksum_sha256,
-            temp_path,
-            status: "uploading".to_string(),
-            created_at: now,
-            expires_at,
-            completed_at: None,
-        };
-
         self.file_repo
-            .create_chunked_upload(&upload)
+            .create_chunked_upload(
+                ctx.user_id,
+                folder.storage_id,
+                req.folder_id,
+                &req.file_name,
+                req.file_size,
+                req.mime_type.as_deref(),
+                chunk_size as i32,
+                total_chunks,
+                req.checksum_sha256.as_deref(),
+                &temp_path,
+                expires_at,
+            )
             .await
             .map_err(|e| AppError::internal(format!("Failed to create upload session: {e}")))?;
 
@@ -308,7 +318,7 @@ impl UploadService {
         // Write chunk to temp storage
         let chunk_path = format!("{}/chunk_{:06}", upload.temp_path, chunk_number);
         self.storage
-            .write(upload.storage_id, &chunk_path, data)
+            .write(&upload.storage_id, &chunk_path, data)
             .await
             .map_err(|e| AppError::internal(format!("Failed to write chunk: {e}")))?;
 
@@ -388,7 +398,7 @@ impl UploadService {
             let chunk_path = format!("{}/chunk_{:06}", upload.temp_path, chunk_num);
             let chunk_data = self
                 .storage
-                .read(upload.storage_id, &chunk_path)
+                .read(&upload.storage_id, &chunk_path)
                 .await
                 .map_err(|e| {
                     AppError::internal(format!("Failed to read chunk {chunk_num}: {e}"))
@@ -399,7 +409,7 @@ impl UploadService {
         // Write assembled file
         self.storage
             .write(
-                upload.storage_id,
+                &upload.storage_id,
                 &storage_path,
                 Bytes::from(assembled.clone()),
             )
@@ -407,9 +417,7 @@ impl UploadService {
             .map_err(|e| AppError::internal(format!("Failed to write assembled file: {e}")))?;
 
         // Create file record
-        let now = Utc::now();
-        let file = File {
-            id: file_id,
+        let file_record = CreateFile {
             folder_id: upload.target_folder_id,
             storage_id: upload.storage_id,
             name: upload.file_name.clone(),
@@ -417,31 +425,26 @@ impl UploadService {
             mime_type: upload.mime_type.clone(),
             size_bytes: assembled.len() as i64,
             checksum_sha256: upload.checksum_sha256.clone(),
-            metadata: serde_json::json!({}),
-            current_version: 1,
-            is_locked: false,
-            locked_by: None,
-            locked_at: None,
+            metadata: Some(serde_json::json!({})),
             owner_id: ctx.user_id,
-            created_at: now,
-            updated_at: now,
         };
 
-        self.file_repo
-            .create(&file)
+        let file = self
+            .file_repo
+            .create(&file_record)
             .await
             .map_err(|e| AppError::internal(format!("Failed to create file record: {e}")))?;
 
         // Mark upload as completed
         self.file_repo
-            .complete_chunked_upload(upload_id, now)
+            .complete_chunked_upload(upload_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to complete upload: {e}")))?;
 
         // Cleanup temp chunks (best effort)
         for chunk_num in 0..upload.total_chunks {
             let chunk_path = format!("{}/chunk_{:06}", upload.temp_path, chunk_num);
-            let _ = self.storage.delete(upload.storage_id, &chunk_path).await;
+            let _ = self.storage.delete(&upload.storage_id, &chunk_path).await;
         }
 
         info!(
@@ -452,6 +455,24 @@ impl UploadService {
             chunks = upload.total_chunks,
             "Chunked upload completed and assembled"
         );
+
+        // Fire AfterUpload hook
+        let mut payload = HookPayload::new(HookPoint::AfterUpload)
+            .with_uuid("file_id", file.id)
+            .with_uuid("folder_id", file.folder_id)
+            .with_uuid("owner_id", file.owner_id)
+            .with_string("name", &file.name)
+            .with_string("storage_path", &file.storage_path)
+            .with_int("size_bytes", file.size_bytes);
+
+        if let Some(mime) = &file.mime_type {
+            payload = payload.with_string("mime_type", mime);
+        }
+
+        self.plugin_manager
+            .dispatcher()
+            .fire_and_forget(&payload)
+            .await;
 
         Ok(file)
     }

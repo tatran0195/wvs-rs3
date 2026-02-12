@@ -9,6 +9,7 @@ use tracing;
 
 use filehub_database::repositories::session::SessionRepository;
 use filehub_entity::job::model::Job;
+use filehub_entity::presence::PresenceStatus;
 
 use crate::executor::{JobExecutionError, JobHandler};
 
@@ -72,11 +73,7 @@ impl PresenceJobHandler {
                 session.id
             );
 
-            if let Err(e) = self
-                .session_repo
-                .update_ws_connected(session.id, false)
-                .await
-            {
+            if let Err(e) = self.session_repo.update_ws_state(session.id, false).await {
                 tracing::warn!(
                     "Failed to update ws_connected for session {}: {}",
                     session.id,
@@ -169,7 +166,7 @@ impl JobHandler for IdleSessionCheckHandler {
         for session in &idle_sessions {
             if let Err(e) = self
                 .session_repo
-                .update_presence_status(session.id, "idle")
+                .update_presence(session.id, &PresenceStatus::Idle)
                 .await
             {
                 tracing::warn!("Failed to mark session {} as idle: {}", session.id, e);

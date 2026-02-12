@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use chrono::{Duration, Utc};
-use uuid::Uuid;
 
 use filehub_core::error::AppError;
 use filehub_database::repositories::audit::AuditLogRepository;

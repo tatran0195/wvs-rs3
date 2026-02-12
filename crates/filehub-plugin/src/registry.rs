@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::hooks::definitions::HookPoint;
 
@@ -23,7 +23,7 @@ pub struct PluginInfo {
     /// Author or maintainer.
     pub author: String,
     /// List of hook points this plugin registers for.
-    pub hooks: Vec<String>,
+    pub hooks: Vec<HookPoint>,
     /// Whether the plugin is currently enabled.
     pub enabled: bool,
     /// Load priority (lower = loaded first).
@@ -50,6 +50,9 @@ pub trait Plugin: Send + Sync + std::fmt::Debug {
 
     /// Returns the hook points this plugin wants to register for.
     fn registered_hooks(&self) -> Vec<HookPoint>;
+
+    /// Returns a reference to self as Any for downcasting.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Registry of all loaded plugins.

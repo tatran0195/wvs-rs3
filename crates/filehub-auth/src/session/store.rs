@@ -3,13 +3,15 @@
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
+use filehub_entity::presence::PresenceStatus;
+use filehub_entity::session::model::CreateSession;
 use uuid::Uuid;
 
 use filehub_core::config::SessionConfig;
 use filehub_core::error::AppError;
 use filehub_database::repositories::session::SessionRepository;
-use filehub_entity::session::{PresenceStatus, Session};
+use filehub_entity::session::Session;
 
 /// Abstracts session persistence operations.
 #[derive(Debug, Clone)]
@@ -39,34 +41,23 @@ impl SessionStore {
         let now = Utc::now();
         let expires_at = now + Duration::hours(self.config.absolute_timeout_hours as i64);
 
-        let session = Session {
-            id: Uuid::new_v4(),
+        let session = CreateSession {
             user_id,
             token_hash: token_hash.to_string(),
             refresh_token_hash: Some(refresh_token_hash.to_string()),
             ip_address: ip_address.to_string(),
             user_agent: user_agent.map(String::from),
             device_info,
-            license_checkout_id: None,
-            seat_allocated_at: None,
-            overflow_kicked: None,
-            presence_status: PresenceStatus::Active,
-            ws_connected: false,
-            ws_connected_at: None,
-            terminated_by: None,
-            terminated_reason: None,
-            terminated_at: None,
-            created_at: now,
             expires_at,
-            last_activity: now,
         };
 
-        self.repo
+        let result = self
+            .repo
             .create(&session)
             .await
             .map_err(|e| AppError::internal(format!("Failed to create session: {e}")))?;
 
-        Ok(session)
+        Ok(result)
     }
 
     /// Finds a session by ID.
@@ -88,7 +79,7 @@ impl SessionStore {
     /// Finds the oldest active session for a user (for kick_oldest strategy).
     pub async fn find_oldest_by_user(&self, user_id: Uuid) -> Result<Option<Session>, AppError> {
         self.repo
-            .find_oldest_active_by_user(user_id)
+            .find_oldest_by_user(user_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to find oldest session: {e}")))
     }
@@ -112,7 +103,7 @@ impl SessionStore {
     /// Updates session's last activity timestamp.
     pub async fn touch_activity(&self, session_id: Uuid) -> Result<(), AppError> {
         self.repo
-            .update_last_activity(session_id, Utc::now())
+            .update_last_activity(session_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to update activity: {e}")))
     }
@@ -124,7 +115,7 @@ impl SessionStore {
         checkout_id: &str,
     ) -> Result<(), AppError> {
         self.repo
-            .set_license_checkout(session_id, checkout_id, Utc::now())
+            .set_license_checkout(session_id, checkout_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to set license checkout: {e}")))
     }
@@ -132,7 +123,7 @@ impl SessionStore {
     /// Sets the seat allocation timestamp.
     pub async fn set_seat_allocated(&self, session_id: Uuid) -> Result<(), AppError> {
         self.repo
-            .set_seat_allocated(session_id, Utc::now())
+            .set_seat_allocated(session_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to set seat allocation: {e}")))
     }
@@ -144,15 +135,16 @@ impl SessionStore {
         terminated_by: Option<Uuid>,
         reason: &str,
     ) -> Result<(), AppError> {
-        let now = Utc::now();
+        // Repository terminate expects non-optional terminated_by
+        let by = terminated_by.unwrap_or(Uuid::nil());
         self.repo
-            .terminate(session_id, terminated_by, reason, now)
+            .terminate(session_id, by, reason)
             .await
             .map_err(|e| AppError::internal(format!("Failed to terminate session: {e}")))
     }
 
     /// Deletes a session record.
-    pub async fn delete_session(&self, session_id: Uuid) -> Result<(), AppError> {
+    pub async fn delete_session(&self, session_id: Uuid) -> Result<bool, AppError> {
         self.repo
             .delete(session_id)
             .await
@@ -181,7 +173,7 @@ impl SessionStore {
     /// Finds all active sessions (for admin view).
     pub async fn find_all_active(&self) -> Result<Vec<Session>, AppError> {
         self.repo
-            .find_all_active()
+            .find_active_by_user_all()
             .await
             .map_err(|e| AppError::internal(format!("Failed to find all active sessions: {e}")))
     }

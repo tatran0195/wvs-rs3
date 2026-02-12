@@ -4,6 +4,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use chrono::Utc;
+use filehub_core::config::session::OverflowStrategy;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -187,7 +188,7 @@ impl SessionManager {
         match result {
             Ok(login_result) => {
                 // Update last login
-                let _ = self.user_repo.update_last_login(user.id, Utc::now()).await;
+                let _ = self.user_repo.update_last_login(user.id).await;
                 info!(
                     user_id = %user.id,
                     session_id = %login_result.session.id,
@@ -503,14 +504,14 @@ impl SessionManager {
 
     /// Handles a failed login attempt by incrementing the counter and locking if needed.
     async fn handle_failed_login(&self, user: &User) -> Result<(), AppError> {
-        let new_count = user.failed_login_attempts + 1;
+        let new_count = user.failed_login_attempts.unwrap_or(0) + 1;
 
         if new_count >= self.auth_config.max_failed_attempts as i32 {
             let locked_until = Utc::now()
                 + chrono::Duration::minutes(self.auth_config.lockout_duration_minutes as i64);
 
             self.user_repo
-                .lock_user(user.id, new_count, Some(locked_until))
+                .lock_until(user.id, locked_until)
                 .await
                 .map_err(|e| AppError::internal(format!("Failed to lock user: {e}")))?;
 
@@ -522,10 +523,11 @@ impl SessionManager {
                 "User account locked due to failed login attempts"
             );
         } else {
-            self.user_repo
-                .increment_failed_attempts(user.id, new_count)
+            let _ = self
+                .user_repo
+                .increment_failed_attempts(user.id)
                 .await
-                .map_err(|e| AppError::internal(format!("Failed to update attempts: {e}")))?;
+                .map_err(|e| AppError::internal(format!("Failed to update attempts: {e}")));
         }
 
         Ok(())
@@ -533,7 +535,7 @@ impl SessionManager {
 
     /// Resets the failed login counter on successful authentication.
     async fn reset_failed_attempts(&self, user: &User) -> Result<(), AppError> {
-        if user.failed_login_attempts > 0 {
+        if user.failed_login_attempts.unwrap_or(0) > 0 {
             self.user_repo
                 .reset_failed_attempts(user.id)
                 .await
@@ -546,11 +548,11 @@ impl SessionManager {
     async fn handle_overflow(&self, user: &User, max_sessions: u32) -> Result<(), AppError> {
         let strategy = &self.session_config.limits.overflow_strategy;
 
-        match strategy.as_str() {
-            "deny" => Err(AppError::conflict(format!(
+        match strategy {
+            OverflowStrategy::Deny => Err(AppError::conflict(format!(
                 "Maximum concurrent sessions ({max_sessions}) reached. Please log out of another session first."
             ))),
-            "kick_oldest" => {
+            OverflowStrategy::KickOldest => {
                 let oldest = self
                     .session_store
                     .find_oldest_by_user(user.id)
@@ -574,7 +576,7 @@ impl SessionManager {
 
                 Ok(())
             }
-            "kick_idle" => {
+            OverflowStrategy::KickIdle => {
                 let idle = self
                     .session_store
                     .find_most_idle_by_user(user.id)

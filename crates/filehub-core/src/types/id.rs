@@ -76,14 +76,14 @@ macro_rules! define_id {
             }
         }
 
-        #[cfg(feature = "sqlx-support")]
+        #[cfg(feature = "sqlx")]
         impl sqlx::Type<sqlx::Postgres> for $name {
             fn type_info() -> sqlx::postgres::PgTypeInfo {
                 <Uuid as sqlx::Type<sqlx::Postgres>>::type_info()
             }
         }
 
-        #[cfg(feature = "sqlx-support")]
+        #[cfg(feature = "sqlx")]
         impl<'q> sqlx::Encode<'q, sqlx::Postgres> for $name {
             fn encode_by_ref(
                 &self,
@@ -93,7 +93,7 @@ macro_rules! define_id {
             }
         }
 
-        #[cfg(feature = "sqlx-support")]
+        #[cfg(feature = "sqlx")]
         impl<'r> sqlx::Decode<'r, sqlx::Postgres> for $name {
             fn decode(
                 value: <sqlx::Postgres as sqlx::Database>::ValueRef<'r>,

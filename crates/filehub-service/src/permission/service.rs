@@ -69,7 +69,7 @@ impl PermissionService {
     /// Gets all ACL entries for a resource.
     pub async fn get_entries(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         resource_type: ResourceType,
         resource_id: Uuid,
     ) -> Result<Vec<AclEntry>, AppError> {
@@ -93,21 +93,18 @@ impl PermissionService {
                 .require_permission(&ctx.role, &SystemPermission::PermissionManageAll)?;
         }
 
-        let entry = AclEntry {
-            id: Uuid::new_v4(),
-            resource_type: resource_type.clone(),
-            resource_id,
-            user_id: req.user_id,
-            is_anyone: req.is_anyone,
-            permission: req.permission,
-            inheritance: req.inheritance,
-            granted_by: ctx.user_id,
-            expires_at: req.expires_at,
-            created_at: Utc::now(),
-        };
-
-        self.acl_repo
-            .create(&entry)
+        let entry = self
+            .acl_repo
+            .create(
+                resource_type,
+                resource_id,
+                req.user_id,
+                req.is_anyone,
+                req.permission,
+                req.inheritance,
+                ctx.user_id,
+                req.expires_at,
+            )
             .await
             .map_err(|e| AppError::internal(format!("Failed to create ACL entry: {e}")))?;
 

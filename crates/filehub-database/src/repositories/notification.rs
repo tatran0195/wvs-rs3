@@ -6,7 +6,7 @@ use uuid::Uuid;
 use filehub_core::error::{AppError, ErrorKind};
 use filehub_core::result::AppResult;
 use filehub_core::types::pagination::{PageRequest, PageResponse};
-use filehub_entity::notification::model::Notification;
+use filehub_entity::notification::model::{AdminBroadcast, Notification};
 use filehub_entity::notification::preference::NotificationPreference;
 
 /// Repository for notification CRUD operations.
@@ -55,7 +55,7 @@ impl NotificationRepository {
     }
 
     /// Count unread notifications for a user.
-    pub async fn count_unread(&self, user_id: Uuid) -> AppResult<u64> {
+    pub async fn count_unread(&self, user_id: Uuid) -> AppResult<i64> {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND (is_read IS NULL OR is_read = FALSE)"
         )
@@ -63,7 +63,7 @@ impl NotificationRepository {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to count unread", e))?;
-        Ok(count as u64)
+        Ok(count)
     }
 
     /// Create a notification.
@@ -75,7 +75,7 @@ impl NotificationRepository {
         title: &str,
         message: &str,
         payload: Option<&serde_json::Value>,
-        priority: &str,
+        priority: Option<&str>,
         actor_id: Option<Uuid>,
         resource_type: Option<&str>,
         resource_id: Option<Uuid>,
@@ -100,9 +100,10 @@ impl NotificationRepository {
     }
 
     /// Mark a notification as read.
-    pub async fn mark_read(&self, notification_id: Uuid) -> AppResult<()> {
-        sqlx::query("UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE id = $1")
+    pub async fn mark_read(&self, notification_id: Uuid, user_id: Uuid) -> AppResult<()> {
+        sqlx::query("UPDATE notifications SET is_read = TRUE, read_at = NOW() WHERE id = $1 AND user_id = $2")
             .bind(notification_id)
+            .bind(user_id)
             .execute(&self.pool)
             .await
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to mark read", e))?;
@@ -110,7 +111,7 @@ impl NotificationRepository {
     }
 
     /// Mark all notifications as read for a user.
-    pub async fn mark_all_read(&self, user_id: Uuid) -> AppResult<u64> {
+    pub async fn mark_all_read(&self, user_id: Uuid) -> AppResult<i64> {
         let result = sqlx::query(
             "UPDATE notifications SET is_read = TRUE, read_at = NOW() \
              WHERE user_id = $1 AND (is_read IS NULL OR is_read = FALSE)",
@@ -119,13 +120,14 @@ impl NotificationRepository {
         .execute(&self.pool)
         .await
         .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to mark all read", e))?;
-        Ok(result.rows_affected())
+        Ok(result.rows_affected() as i64)
     }
 
     /// Dismiss a notification.
-    pub async fn dismiss(&self, notification_id: Uuid) -> AppResult<()> {
-        sqlx::query("UPDATE notifications SET is_dismissed = TRUE WHERE id = $1")
+    pub async fn dismiss(&self, notification_id: Uuid, user_id: Uuid) -> AppResult<()> {
+        sqlx::query("UPDATE notifications SET is_dismissed = TRUE WHERE id = $1 AND user_id = $2")
             .bind(notification_id)
+            .bind(user_id)
             .execute(&self.pool)
             .await
             .map_err(|e| {
@@ -177,5 +179,71 @@ impl NotificationRepository {
                 AppError::with_source(ErrorKind::Database, "Failed to cleanup notifications", e)
             })?;
         Ok(result.rows_affected())
+    }
+
+    /// Delete old broadcasts.
+    pub async fn delete_old_broadcasts(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<u64> {
+        let result = sqlx::query("DELETE FROM admin_broadcasts WHERE created_at < $1")
+            .bind(before)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                AppError::with_source(ErrorKind::Database, "Failed to delete old broadcasts", e)
+            })?;
+        Ok(result.rows_affected())
+    }
+
+    /// Keep only the latest N notifications for each user.
+    pub async fn trim_per_user(&self, limit: i64) -> AppResult<u64> {
+        let result = sqlx::query(
+            "DELETE FROM notifications WHERE id IN (\
+                SELECT id FROM (\
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) as r_num \
+                    FROM notifications\
+                ) t WHERE t.r_num > $1\
+             )",
+        )
+        .bind(limit)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to trim notifications", e))?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Create a broadcast message.
+    pub async fn create_broadcast(&self, broadcast: &AdminBroadcast) -> AppResult<AdminBroadcast> {
+        sqlx::query_as::<_, AdminBroadcast>(
+            "INSERT INTO admin_broadcasts (id, admin_id, target, title, message, severity, persistent, action_type, action_payload, delivered_count, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *"
+        )
+        .bind(broadcast.id)
+        .bind(broadcast.admin_id)
+        .bind(&broadcast.target)
+        .bind(&broadcast.title)
+        .bind(&broadcast.message)
+        .bind(&broadcast.severity)
+        .bind(broadcast.persistent)
+        .bind(&broadcast.action_type)
+        .bind(&broadcast.action_payload)
+        .bind(broadcast.delivered_count)
+        .bind(broadcast.created_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to create broadcast", e))
+    }
+
+    /// Find recent broadcasts.
+    pub async fn find_broadcasts(&self, limit: i64) -> AppResult<Vec<AdminBroadcast>> {
+        sqlx::query_as::<_, AdminBroadcast>(
+            "SELECT * FROM admin_broadcasts ORDER BY created_at DESC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to find broadcasts", e))
     }
 }

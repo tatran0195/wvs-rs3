@@ -6,16 +6,12 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use tracing;
 use uuid::Uuid;
-
-use filehub_core::types::id::UserId;
 
 use crate::channel::types::ChannelType;
 use crate::connection::manager::ConnectionManager;
 use crate::message::types::OutboundMessage;
 use crate::notification::dispatcher::NotificationDispatcher;
-use crate::notification::formatter;
 use crate::presence::tracker::PresenceTracker;
 
 /// Bridges domain events into the realtime system.

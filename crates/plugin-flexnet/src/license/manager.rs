@@ -9,7 +9,6 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing;
-use uuid::Uuid;
 
 use filehub_core::config::LicenseConfig;
 use filehub_core::error::AppError;
@@ -103,7 +102,7 @@ impl LicenseManager {
 
         // Mark all active DB checkouts as checked in
         let active_checkouts =
-            self.checkout_repo.find_active().await.map_err(|e| {
+            self.checkout_repo.find_all_active().await.map_err(|e| {
                 AppError::internal(format!("Failed to find active checkouts: {}", e))
             })?;
 
@@ -155,29 +154,27 @@ impl LicenseManager {
             })?;
 
         // Record in database
-        let checkout = LicenseCheckout {
-            id: Uuid::new_v4(),
-            session_id: Some(*session_id),
-            user_id: *user_id,
-            feature_name: feature.clone(),
-            checkout_token: session_id_str.clone(),
-            checked_out_at: Utc::now(),
-            checked_in_at: None,
-            ip_address,
-            is_active: true,
-        };
-
-        self.checkout_repo.create(&checkout).await.map_err(|e| {
-            // Rollback: checkin the DLL checkout if DB write fails
-            tracing::error!(
-                "DB checkout record failed, rolling back DLL checkout: {}",
-                e
-            );
-            if let Err(rollback_err) = self.wrapper.checkin(feature, &session_id_str) {
-                tracing::error!("Rollback checkin also failed: {}", rollback_err);
-            }
-            AppError::internal(format!("Failed to save checkout record: {}", e))
-        })?;
+        let checkout = self
+            .checkout_repo
+            .create(
+                session_id.into_uuid(),
+                user_id.into_uuid(),
+                feature,
+                &session_id_str,
+                ip_address.as_deref(),
+            )
+            .await
+            .map_err(|e| {
+                // Rollback: checkin the DLL checkout if DB write fails
+                tracing::error!(
+                    "DB checkout record failed, rolling back DLL checkout: {}",
+                    e
+                );
+                if let Err(rollback_err) = self.wrapper.checkin(feature, &session_id_str) {
+                    tracing::error!("Rollback checkin also failed: {}", rollback_err);
+                }
+                AppError::internal(format!("Failed to save checkout record: {}", e))
+            })?;
 
         self.invalidate_cache().await;
 
@@ -216,7 +213,7 @@ impl LicenseManager {
         // Update DB: mark checkout as checked in
         let active_checkouts = self
             .checkout_repo
-            .find_active_by_session(*session_id)
+            .find_active_by_session(session_id.into_uuid())
             .await
             .map_err(|e| AppError::internal(format!("Failed to find session checkouts: {}", e)))?;
 
@@ -279,8 +276,8 @@ impl LicenseManager {
                 AppError::internal(format!("Failed to count active checkouts: {}", e))
             })?;
 
-        let admin_reserved = if self.config.pool.admin_reserved_enabled() {
-            self.config.pool.admin_reserved_seats() as i32
+        let admin_reserved = if self.config.pool.admin_reserved_enabled {
+            self.config.pool.admin_reserved_seats as i32
         } else {
             0
         };
@@ -296,34 +293,36 @@ impl LicenseManager {
             None
         };
 
+        let usage_percent = if is_star || total_seats == 0 {
+            0.0
+        } else {
+            (used_seats as f64 / total_seats as f64) * 100.0
+        };
+
         let status = PoolStatus {
             total_seats: if is_star { -1 } else { total_seats },
             checked_out: used_seats,
             available,
             admin_reserved,
             active_sessions: active_db_sessions as i32,
-            warning_threshold: self.config.pool.warning_threshold_percent,
-            critical_threshold: self.config.pool.critical_threshold_percent,
             drift_detected,
+            usage_percent,
         };
 
         // Save snapshot
-        let snapshot = PoolSnapshot {
-            id: Uuid::new_v4(),
-            total_seats: status.total_seats,
-            checked_out: status.checked_out,
-            available: status.available,
-            admin_reserved: status.admin_reserved,
-            active_sessions: status.active_sessions,
-            drift_detected: status.drift_detected,
-            drift_detail,
-            source: "sync".to_string(),
-            created_at: Utc::now(),
-        };
-
-        if let Err(e) = self.snapshot_repo.create(&snapshot).await {
-            tracing::warn!("Failed to save pool snapshot: {}", e);
-        }
+        let _ = self
+            .snapshot_repo
+            .create(
+                status.total_seats,
+                status.checked_out,
+                status.available,
+                status.admin_reserved,
+                status.active_sessions,
+                status.drift_detected,
+                drift_detail.as_ref(),
+                "sync",
+            )
+            .await;
 
         // Update cache
         {
@@ -346,14 +345,14 @@ impl LicenseManager {
         let feature = &self.config.feature_name;
 
         // Get DLL state
-        let (total, used) = self
+        let (_, used) = self
             .wrapper
             .get_token_pool(feature)
             .map_err(|e| AppError::internal(format!("Failed to get DLL pool state: {}", e)))?;
 
         // Get DB state
         let active_checkouts =
-            self.checkout_repo.find_active().await.map_err(|e| {
+            self.checkout_repo.find_all_active().await.map_err(|e| {
                 AppError::internal(format!("Failed to find active checkouts: {}", e))
             })?;
 
@@ -416,10 +415,15 @@ impl LicenseManager {
 
     /// Get pool snapshot history
     pub async fn pool_history(&self, limit: i64) -> Result<Vec<PoolSnapshot>, AppError> {
-        self.snapshot_repo
-            .find_recent(limit)
+        use filehub_core::types::pagination::PageRequest;
+        let page = PageRequest::new(1, limit as u64);
+        let response = self
+            .snapshot_repo
+            .find_recent(&page)
             .await
-            .map_err(|e| AppError::internal(format!("Failed to get pool history: {}", e)))
+            .map_err(|e| AppError::internal(format!("Failed to get pool history: {}", e)))?;
+
+        Ok(response.items)
     }
 
     /// Check if the license manager is using mock implementation
@@ -448,8 +452,7 @@ impl LicenseManager {
     }
 
     /// Invalidate the cached pool status
-    async fn invalidate_cache(&self) {
-        let mut cached = self.cached_status.write().await;
-        *cached = None;
+    pub async fn invalidate_cache(&self) {
+        self.cached_status.write().await.take();
     }
 }

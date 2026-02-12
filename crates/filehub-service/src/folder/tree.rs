@@ -42,20 +42,39 @@ impl TreeService {
             .await
             .map_err(|e| AppError::internal(format!("Failed to get descendants: {e}")))?;
 
-        let tree = self.build_tree(root, &descendants);
+        // Fetch file counts
+        let mut ids = vec![folder_id];
+        ids.extend(descendants.iter().map(|f| f.id));
+        let file_counts = self
+            .folder_repo
+            .count_files_batch(&ids)
+            .await
+            .map_err(|e| AppError::internal(format!("Failed to get file counts: {e}")))?;
+
+        let tree = self.build_tree(root, &descendants, &file_counts);
         Ok(tree)
     }
 
     /// Builds a tree from a flat list of folders.
-    fn build_tree(&self, root: Folder, all_folders: &[Folder]) -> FolderNode {
+    fn build_tree(
+        &self,
+        root: Folder,
+        all_folders: &[Folder],
+        file_counts: &std::collections::HashMap<Uuid, u64>,
+    ) -> FolderNode {
         let children: Vec<FolderNode> = all_folders
             .iter()
             .filter(|f| f.parent_id == Some(root.id))
-            .map(|child| self.build_tree(child.clone(), all_folders))
+            .map(|child| self.build_tree(child.clone(), all_folders, file_counts))
             .collect();
 
         FolderNode {
-            folder: root,
+            id: root.id,
+            name: root.name,
+            path: root.path,
+            depth: root.depth,
+            child_count: children.len() as u64,
+            file_count: *file_counts.get(&root.id).unwrap_or(&0),
             children,
         }
     }
@@ -67,7 +86,7 @@ impl TreeService {
         path: &str,
     ) -> Result<Option<Folder>, AppError> {
         self.folder_repo
-            .find_by_storage_and_path(storage_id, path)
+            .find_by_path(storage_id, path)
             .await
             .map_err(|e| AppError::internal(format!("Path resolution failed: {e}")))
     }

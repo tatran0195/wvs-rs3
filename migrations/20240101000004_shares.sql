@@ -1,5 +1,10 @@
 -- Shares
-CREATE TYPE IF NOT EXISTS share_type AS ENUM ('public_link', 'private_link', 'user_share');
+DO $$ BEGIN
+    CREATE TYPE share_type AS ENUM ('public_link', 'private_link', 'user_share');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 
 CREATE TABLE IF NOT EXISTS shares (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

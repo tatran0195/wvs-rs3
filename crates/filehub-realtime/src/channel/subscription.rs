@@ -1,11 +1,6 @@
 //! Subscription management with ACL permission checking.
 
-use std::sync::Arc;
-
-use tracing;
-use uuid::Uuid;
-
-use filehub_core::types::id::UserId;
+use filehub_core::types::UserId;
 use filehub_entity::user::role::UserRole;
 
 use super::types::ChannelType;
@@ -36,7 +31,7 @@ pub fn authorize_subscription(
 ) -> SubscriptionAuth {
     match channel_type {
         ChannelType::User(user_id) => {
-            if *handle.user_id == *user_id {
+            if handle.user_id == UserId::from_uuid(*user_id) {
                 SubscriptionAuth::Allowed
             } else {
                 SubscriptionAuth::Denied("Cannot subscribe to another user's channel".to_string())

@@ -6,7 +6,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing;
-use uuid::Uuid;
 
 use filehub_core::error::AppError;
 use filehub_entity::job::model::Job;
@@ -72,8 +71,8 @@ impl JobExecutor {
             "Executing job: id={}, type='{}', attempt={}/{}",
             job.id,
             job.job_type,
-            job.attempts + 1,
-            job.max_attempts
+            job.attempts.unwrap_or(0) + 1,
+            job.max_attempts.unwrap_or(0)
         );
 
         handler.execute(job).await

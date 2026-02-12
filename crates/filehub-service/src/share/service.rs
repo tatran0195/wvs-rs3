@@ -11,7 +11,7 @@ use filehub_core::error::AppError;
 use filehub_core::types::pagination::{PageRequest, PageResponse};
 use filehub_database::repositories::share::ShareRepository;
 use filehub_entity::permission::AclPermission;
-use filehub_entity::share::{Share, ShareType};
+use filehub_entity::share::{CreateShare, Share, ShareType};
 
 use super::link::LinkService;
 use crate::context::RequestContext;
@@ -86,7 +86,7 @@ impl ShareService {
         page: PageRequest,
     ) -> Result<PageResponse<Share>, AppError> {
         self.share_repo
-            .find_by_creator(ctx.user_id, page)
+            .find_by_creator(ctx.user_id, &page)
             .await
             .map_err(|e| AppError::internal(format!("Failed to list shares: {e}")))
     }
@@ -116,27 +116,22 @@ impl ShareService {
             ));
         }
 
-        let now = Utc::now();
-        let share = Share {
-            id: Uuid::new_v4(),
+        let share = CreateShare {
             share_type: req.share_type,
             resource_type: req.resource_type,
             resource_id: req.resource_id,
-            created_by: ctx.user_id,
-            token,
             password_hash,
+            token,
             shared_with: req.shared_with,
             permission: req.permission,
             allow_download: req.allow_download,
             max_downloads: req.max_downloads,
-            download_count: 0,
             expires_at: req.expires_at,
-            is_active: true,
-            created_at: now,
-            last_accessed: None,
+            created_by: ctx.user_id,
         };
 
-        self.share_repo
+        let share = self
+            .share_repo
             .create(&share)
             .await
             .map_err(|e| AppError::internal(format!("Failed to create share: {e}")))?;
@@ -176,20 +171,17 @@ impl ShareService {
     ) -> Result<Share, AppError> {
         let mut share = self.get_share(ctx, share_id).await?;
 
+        share.allow_download = req.allow_download;
+        share.is_active = req.is_active;
+
         if let Some(permission) = req.permission {
             share.permission = permission;
-        }
-        if let Some(allow_download) = req.allow_download {
-            share.allow_download = allow_download;
         }
         if let Some(max_downloads) = req.max_downloads {
             share.max_downloads = max_downloads;
         }
         if let Some(expires_at) = req.expires_at {
             share.expires_at = expires_at;
-        }
-        if let Some(is_active) = req.is_active {
-            share.is_active = is_active;
         }
 
         self.share_repo

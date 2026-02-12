@@ -31,7 +31,6 @@ COPY crates/filehub-storage/Cargo.toml crates/filehub-storage/
 COPY crates/filehub-auth/Cargo.toml crates/filehub-auth/
 COPY crates/filehub-service/Cargo.toml crates/filehub-service/
 COPY crates/filehub-realtime/Cargo.toml crates/filehub-realtime/
-COPY crates/filehub-webdav/Cargo.toml crates/filehub-webdav/
 COPY crates/filehub-worker/Cargo.toml crates/filehub-worker/
 COPY crates/filehub-plugin/Cargo.toml crates/filehub-plugin/
 COPY crates/filehub-plugin-sdk/Cargo.toml crates/filehub-plugin-sdk/

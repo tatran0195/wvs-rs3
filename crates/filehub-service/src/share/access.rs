@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use tracing::info;
 
 use filehub_auth::password::PasswordHasher;
 use filehub_core::error::AppError;
@@ -60,7 +59,7 @@ impl AccessService {
     }
 
     /// Records a download against a share (for download counting).
-    pub async fn record_download(&self, share_id: uuid::Uuid) -> Result<(), AppError> {
+    pub async fn record_download(&self, share_id: uuid::Uuid) -> Result<i32, AppError> {
         self.share_repo
             .increment_download_count(share_id)
             .await
@@ -69,7 +68,7 @@ impl AccessService {
 
     /// Validates share is active, not expired, and within download limits.
     fn validate_share(&self, share: &Share) -> Result<(), AppError> {
-        if !share.is_active {
+        if share.is_active.unwrap_or(false) {
             return Err(AppError::not_found("Share link has been deactivated"));
         }
 
@@ -80,7 +79,7 @@ impl AccessService {
         }
 
         if let Some(max) = share.max_downloads {
-            if share.download_count >= max {
+            if share.download_count.unwrap_or(0) >= max {
                 return Err(AppError::not_found(
                     "Share link has reached its download limit",
                 ));

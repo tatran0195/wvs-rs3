@@ -1,13 +1,12 @@
 //! # filehub-api
 //!
-//! HTTP API layer for Suzuki FileHub built on Axum.
+//! HTTP API layer for FileHub built on Axum.
 //!
 //! Provides all REST endpoints, WebSocket upgrade, middleware (auth, RBAC,
 //! rate limiting, CORS, logging), extractors, DTOs, and error mapping.
 
 pub mod app;
 pub mod dto;
-pub mod error;
 pub mod extractors;
 pub mod handlers;
 pub mod middleware;

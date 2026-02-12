@@ -20,6 +20,18 @@ impl PoolSnapshotRepository {
         Self { pool }
     }
 
+    /// Find the latest snapshot.
+    pub async fn find_latest(&self) -> AppResult<Option<PoolSnapshot>> {
+        sqlx::query_as::<_, PoolSnapshot>(
+            "SELECT * FROM pool_snapshots ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to find latest snapshot", e)
+        })
+    }
+
     /// Find a snapshot by ID.
     pub async fn find_by_id(&self, id: Uuid) -> AppResult<Option<PoolSnapshot>> {
         sqlx::query_as::<_, PoolSnapshot>("SELECT * FROM pool_snapshots WHERE id = $1")

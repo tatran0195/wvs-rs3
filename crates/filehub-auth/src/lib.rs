@@ -1,7 +1,7 @@
 //! # filehub-auth
 //!
 //! Complete authentication, authorization, session management, and seat allocation
-//! for the Suzuki FileHub platform.
+//! for the FileHub platform.
 //!
 //! ## Modules
 //!

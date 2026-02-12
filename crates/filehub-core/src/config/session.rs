@@ -73,6 +73,16 @@ impl Default for OverflowStrategy {
     }
 }
 
+impl std::fmt::Display for OverflowStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OverflowStrategy::Deny => write!(f, "deny"),
+            OverflowStrategy::KickOldest => write!(f, "kick_oldest"),
+            OverflowStrategy::KickIdle => write!(f, "kick_idle"),
+        }
+    }
+}
+
 /// Admin seat reservation configuration.
 ///
 /// When enabled, a specified number of license seats are reserved

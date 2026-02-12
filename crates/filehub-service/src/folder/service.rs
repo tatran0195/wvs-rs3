@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use filehub_core::types::{PageRequest, PageResponse};
 use tracing::info;
 use uuid::Uuid;
 
@@ -10,7 +11,7 @@ use filehub_auth::acl::EffectivePermissionResolver;
 use filehub_core::error::AppError;
 use filehub_database::repositories::folder::FolderRepository;
 use filehub_database::repositories::storage::StorageRepository;
-use filehub_entity::folder::Folder;
+use filehub_entity::folder::{CreateFolder, Folder};
 use filehub_entity::permission::{AclPermission, ResourceType};
 
 use crate::context::RequestContext;
@@ -61,11 +62,11 @@ impl FolderService {
     /// Lists root folders for a storage.
     pub async fn list_root_folders(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         storage_id: Uuid,
     ) -> Result<Vec<Folder>, AppError> {
         self.folder_repo
-            .find_root_folders(storage_id)
+            .find_roots(storage_id)
             .await
             .map_err(|e| AppError::internal(format!("Failed to list folders: {e}")))
     }
@@ -103,11 +104,10 @@ impl FolderService {
         &self,
         ctx: &RequestContext,
         folder_id: Uuid,
-    ) -> Result<Vec<Folder>, AppError> {
-        let folder = self.get_folder(ctx, folder_id).await?;
-
+        page: PageRequest,
+    ) -> Result<PageResponse<Folder>, AppError> {
         self.folder_repo
-            .find_children(folder_id)
+            .find_children(folder_id, &page)
             .await
             .map_err(|e| AppError::internal(format!("Failed to list children: {e}")))
     }
@@ -155,7 +155,7 @@ impl FolderService {
         // Check for name conflict
         if self
             .folder_repo
-            .find_by_storage_and_path(req.storage_id, &path)
+            .find_by_path(req.storage_id, &path)
             .await
             .map_err(|e| AppError::internal(format!("Database error: {e}")))?
             .is_some()
@@ -166,21 +166,18 @@ impl FolderService {
             )));
         }
 
-        let now = Utc::now();
-        let folder = Folder {
-            id: Uuid::new_v4(),
+        let folder_record = CreateFolder {
             storage_id: req.storage_id,
             parent_id: req.parent_id,
             name: req.name,
             path,
             depth,
             owner_id: ctx.user_id,
-            created_at: now,
-            updated_at: now,
         };
 
-        self.folder_repo
-            .create(&folder)
+        let folder = self
+            .folder_repo
+            .create(&folder_record)
             .await
             .map_err(|e| AppError::internal(format!("Failed to create folder: {e}")))?;
 
@@ -220,7 +217,7 @@ impl FolderService {
             .await?;
 
         // Update path
-        let old_name = folder.name.clone();
+        let old_path = folder.path.clone();
         folder.name = new_name.to_string();
 
         if let Some(last_slash) = folder.path.rfind('/') {
@@ -238,7 +235,7 @@ impl FolderService {
 
         // Update child paths
         self.folder_repo
-            .update_children_paths(folder_id, &old_name, new_name)
+            .update_children_paths(&old_path, &folder.path)
             .await
             .map_err(|e| AppError::internal(format!("Failed to update child paths: {e}")))?;
 
@@ -312,6 +309,7 @@ impl FolderService {
             ));
         }
 
+        let old_path = folder.path.clone();
         folder.parent_id = Some(req.new_parent_id);
         folder.path = format!("{}/{}", target.path, folder.name);
         folder.depth = target.depth + 1;
@@ -321,6 +319,12 @@ impl FolderService {
             .update(&folder)
             .await
             .map_err(|e| AppError::internal(format!("Failed to move folder: {e}")))?;
+
+        // Update child paths
+        self.folder_repo
+            .update_children_paths(&old_path, &folder.path)
+            .await
+            .map_err(|e| AppError::internal(format!("Failed to update child paths: {e}")))?;
 
         info!(
             user_id = %ctx.user_id,

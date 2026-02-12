@@ -1,13 +1,15 @@
 //! Request/response logging middleware.
 
+use std::time::Instant;
+
+use axum::body::Body;
 use axum::http::Request;
 use axum::middleware::Next;
 use axum::response::Response;
-use std::time::Instant;
 use tracing::info;
 
 /// Logs request method, path, status, and duration.
-pub async fn request_logging<B>(request: Request<B>, next: Next<B>) -> Response {
+pub async fn request_logging(request: Request<Body>, next: Next) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
     let start = Instant::now();

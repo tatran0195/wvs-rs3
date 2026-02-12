@@ -1,8 +1,17 @@
 -- Initial schema: Users + Core
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-CREATE TYPE IF NOT EXISTS user_role AS ENUM ('admin', 'manager', 'creator', 'viewer');
-CREATE TYPE IF NOT EXISTS user_status AS ENUM ('active', 'inactive', 'locked');
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('admin', 'manager', 'creator', 'viewer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE user_status AS ENUM ('active', 'inactive', 'locked');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS users (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

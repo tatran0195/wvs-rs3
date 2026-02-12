@@ -2,14 +2,13 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
 use tracing::info;
 use uuid::Uuid;
 
 use filehub_auth::acl::EffectivePermissionResolver;
 use filehub_core::error::AppError;
 use filehub_database::repositories::file::FileRepository;
-use filehub_entity::file::{File, FileVersion};
+use filehub_entity::file::FileVersion;
 use filehub_entity::permission::{AclPermission, ResourceType};
 
 use crate::context::RequestContext;
@@ -92,20 +91,17 @@ impl VersionService {
             )
             .await?;
 
-        let version = FileVersion {
-            id: Uuid::new_v4(),
-            file_id,
-            version_number: file.current_version,
-            storage_path: file.storage_path.clone(),
-            size_bytes: file.size_bytes,
-            checksum_sha256: file.checksum_sha256.clone(),
-            created_by: ctx.user_id,
-            created_at: Utc::now(),
-            comment: comment.map(String::from),
-        };
-
-        self.file_repo
-            .create_version(&version)
+        let version = self
+            .file_repo
+            .create_version(
+                file_id,
+                file.current_version,
+                &file.storage_path,
+                file.size_bytes,
+                file.checksum_sha256.as_deref(),
+                file.owner_id,
+                comment,
+            )
             .await
             .map_err(|e| AppError::internal(format!("Failed to create version: {e}")))?;
 

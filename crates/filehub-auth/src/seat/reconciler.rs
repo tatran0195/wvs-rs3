@@ -4,16 +4,12 @@
 
 use std::sync::Arc;
 
-use chrono::Utc;
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 use filehub_core::error::AppError;
 use filehub_database::repositories::pool_snapshot::PoolSnapshotRepository;
-use filehub_entity::license::PoolSnapshot;
 
 use super::allocator::SeatAllocator;
-use super::limiter::SessionLimiter;
 
 use crate::session::store::SessionStore;
 
@@ -75,32 +71,40 @@ impl SeatReconciler {
         }
 
         // Record snapshot
-        let snapshot = PoolSnapshot {
-            id: Uuid::new_v4(),
-            total_seats: pool_state.total_seats as i32,
-            checked_out: if drift_detected {
-                db_active as i32
-            } else {
-                pool_state.checked_out as i32
-            },
-            available: pool_state.total_seats.saturating_sub(db_active) as i32,
-            admin_reserved: pool_state.admin_reserved as i32,
-            active_sessions: db_active as i32,
-            drift_detected,
-            drift_detail: if drift_detected {
-                Some(serde_json::json!({
-                    "pool_checked_out": pool_state.checked_out,
-                    "db_active_sessions": db_active,
-                    "delta": pool_state.checked_out as i64 - db_active as i64
-                }))
-            } else {
-                None
-            },
-            source: "reconciler".to_string(),
-            created_at: Utc::now(),
+
+        let total_seats = pool_state.total_seats as i32;
+        let checked_out = if drift_detected {
+            db_active as i32
+        } else {
+            pool_state.checked_out as i32
+        };
+        let available = pool_state.total_seats.saturating_sub(db_active) as i32;
+        let admin_reserved = pool_state.admin_reserved as i32;
+        let active_sessions = db_active as i32;
+        let drift_detail = if drift_detected {
+            Some(&serde_json::json!({
+                "pool_checked_out": pool_state.checked_out,
+                "db_active_sessions": db_active,
+                "delta": pool_state.checked_out as i64 - db_active as i64
+            }))
+        } else {
+            None
         };
 
-        if let Err(e) = self.snapshot_repo.create(&snapshot).await {
+        if let Err(e) = self
+            .snapshot_repo
+            .create(
+                total_seats,
+                checked_out,
+                available,
+                admin_reserved,
+                active_sessions,
+                drift_detected,
+                drift_detail,
+                "reconciler",
+            )
+            .await
+        {
             error!(error = %e, "Failed to save pool snapshot");
         }
 

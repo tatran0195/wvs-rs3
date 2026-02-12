@@ -3,10 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::Value;
-use uuid::Uuid;
 
-use filehub_plugin::api::context::PluginContext;
 use filehub_plugin::hooks::definitions::{HookPayload, HookPoint, HookResult};
 use filehub_plugin::hooks::registry::HookHandler;
 
@@ -68,7 +65,6 @@ impl HookHandler for SimpleHandlerAdapter {
 }
 
 /// A closure-based hook handler for quick handler creation.
-#[derive(Debug)]
 pub struct ClosureHandler {
     /// Plugin ID.
     id: String,
@@ -83,6 +79,16 @@ pub struct ClosureHandler {
             + Send
             + Sync,
     >,
+}
+
+impl std::fmt::Debug for ClosureHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClosureHandler")
+            .field("id", &self.id)
+            .field("priority_val", &self.priority_val)
+            .field("handler", &"<closure>")
+            .finish()
+    }
 }
 
 impl ClosureHandler {

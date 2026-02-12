@@ -4,8 +4,6 @@ use chrono::Utc;
 use dashmap::DashMap;
 use uuid::Uuid;
 
-use filehub_core::types::id::UserId;
-
 use super::activity::ActivityTracker;
 use super::status::PresenceStatus;
 

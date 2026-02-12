@@ -1,7 +1,7 @@
 [package]
 name = "filehub-api"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "HTTP API layer using Axum — routes, middleware, handlers, DTOs, and WebSocket upgrade for FileHub"
 
 [dependencies]
@@ -14,6 +14,9 @@ filehub-auth = { path = "../filehub-auth" }
 filehub-service = { path = "../filehub-service" }
 filehub-realtime = { path = "../filehub-realtime" }
 filehub-plugin = { path = "../filehub-plugin" }
+filehub-worker = { path = "../filehub-worker" }
+plugin-flexnet = { path = "../plugin-flexnet" }
+plugin-cad-converter = { path = "../plugin-cad-converter" }
 
 # Async
 tokio = { workspace = true }
@@ -46,3 +49,6 @@ validator = { workspace = true }
 
 # Streaming
 tokio-util = { workspace = true }
+
+# Streaming
+sqlx = { workspace = true }

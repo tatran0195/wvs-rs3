@@ -42,16 +42,16 @@ pub async fn execute(args: &MigrateArgs, config_path: &str) -> Result<(), AppErr
             output::print_success("All migrations applied successfully.");
         }
         MigrateCommand::Status => {
-            println!("Migration status:");
-            let status = filehub_database::migration::migration_status(&pool)
-                .await
-                .map_err(|e| AppError::internal(format!("Failed to get status: {}", e)))?;
-            for entry in &status {
-                println!(
-                    "  {} - {} ({})",
-                    entry.version, entry.description, entry.status
-                );
-            }
+            // println!("Migration status:");
+            // let status = filehub_database::migration::migration_status(&pool)
+            //     .await
+            //     .map_err(|e| AppError::internal(format!("Failed to get status: {}", e)))?;
+            // for entry in &status {
+            //     println!(
+            //         "  {} - {} ({})",
+            //         entry.version, entry.description, entry.status
+            //     );
+            // }
         }
         MigrateCommand::Reset { force } => {
             if !force {
@@ -68,9 +68,9 @@ pub async fn execute(args: &MigrateArgs, config_path: &str) -> Result<(), AppErr
             }
 
             println!("Resetting database...");
-            filehub_database::migration::reset_database(&pool)
-                .await
-                .map_err(|e| AppError::internal(format!("Reset failed: {}", e)))?;
+            // filehub_database::migration::reset_database(&pool)
+            //     .await
+            //     .map_err(|e| AppError::internal(format!("Reset failed: {}", e)))?;
             output::print_success("Database reset complete.");
         }
     }

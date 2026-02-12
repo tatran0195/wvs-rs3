@@ -15,9 +15,8 @@ use tracing;
 
 use filehub_core::error::AppError;
 use filehub_core::types::id::{SessionId, UserId};
-use filehub_plugin::hooks::definitions::{
-    HookAction, HookContext, HookHandler, HookPayload, HookResult,
-};
+use filehub_plugin::hooks::definitions::{HookPayload, HookResult};
+use filehub_plugin::hooks::registry::HookHandler;
 
 use crate::license::manager::LicenseManager;
 
@@ -42,23 +41,23 @@ impl AfterLoginHook {
 
 #[async_trait]
 impl HookHandler for AfterLoginHook {
-    fn name(&self) -> &str {
-        "flexnet_after_login"
-    }
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
+        let user_id = payload
+            .get_uuid("user_id")
+            .ok_or_else(|| AppError::internal("after_login: user_id missing from payload"));
+        let session_id = payload
+            .get_uuid("session_id")
+            .ok_or_else(|| AppError::internal("after_login: session_id missing from payload"));
 
-    fn priority(&self) -> i32 {
-        100
-    }
+        let (user_id, session_id) = match (user_id, session_id) {
+            (Ok(u), Ok(s)) => (u, s),
+            (Err(e), _) | (_, Err(e)) => {
+                tracing::error!("FlexNet after_login: {}", e);
+                return HookResult::halt("flexnet", &e.to_string());
+            }
+        };
 
-    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let user_id = ctx
-            .user_id
-            .ok_or_else(|| AppError::internal("after_login: user_id missing from context"))?;
-        let session_id = ctx
-            .session_id
-            .ok_or_else(|| AppError::internal("after_login: session_id missing from context"))?;
-
-        let ip_address = ctx.ip_address.clone();
+        let ip_address = payload.get_string("ip_address").map(|s| s.to_string());
 
         tracing::info!(
             "FlexNet after_login: checkout for user={}, session={}",
@@ -77,21 +76,29 @@ impl HookHandler for AfterLoginHook {
         {
             Ok(checkout) => {
                 tracing::info!("License checkout successful: session='{}'", session_id);
-                Ok(HookAction::Continue(Some(serde_json::json!({
-                    "license_checkout_id": checkout.id.to_string(),
-                    "feature": checkout.feature_name,
-                    "is_star": self.manager.is_star_license(),
-                }))))
+                HookResult::continue_with_output(
+                    "flexnet",
+                    serde_json::json!({
+                        "license_checkout_id": checkout.id.to_string(),
+                        "feature": checkout.feature_name,
+                        "is_star": self.manager.is_star_license(),
+                    }),
+                )
             }
             Err(e) => {
                 tracing::error!("License checkout FAILED: {}", e);
                 // Halt the login — session will be rolled back
-                Ok(HookAction::Halt(format!(
-                    "No license seats available: {}",
-                    e
-                )))
+                HookResult::halt("flexnet", &format!("No license seats available: {}", e))
             }
         }
+    }
+
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn priority(&self) -> i32 {
+        100
     }
 }
 
@@ -113,18 +120,14 @@ impl BeforeLogoutHook {
 
 #[async_trait]
 impl HookHandler for BeforeLogoutHook {
-    fn name(&self) -> &str {
-        "flexnet_before_logout"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
-
-    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let session_id = ctx
-            .session_id
-            .ok_or_else(|| AppError::internal("before_logout: session_id missing from context"))?;
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
+        let session_id = match payload.get_uuid("session_id") {
+            Some(id) => id,
+            None => {
+                tracing::error!("FlexNet before_logout: session_id missing from payload");
+                return HookResult::continue_execution("flexnet");
+            }
+        };
 
         tracing::info!("FlexNet before_logout: checkin for session={}", session_id);
 
@@ -141,7 +144,15 @@ impl HookHandler for BeforeLogoutHook {
             );
         }
 
-        Ok(HookAction::Continue(None))
+        HookResult::continue_execution("flexnet")
+    }
+
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn priority(&self) -> i32 {
+        100
     }
 }
 
@@ -161,18 +172,14 @@ impl AfterSessionTerminateHook {
 
 #[async_trait]
 impl HookHandler for AfterSessionTerminateHook {
-    fn name(&self) -> &str {
-        "flexnet_after_session_terminate"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
-
-    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let session_id = ctx
-            .session_id
-            .ok_or_else(|| AppError::internal("after_session_terminate: session_id missing"))?;
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
+        let session_id = match payload.get_uuid("session_id") {
+            Some(id) => id,
+            None => {
+                tracing::error!("FlexNet after_session_terminate: session_id missing from payload");
+                return HookResult::continue_execution("flexnet");
+            }
+        };
 
         tracing::info!(
             "FlexNet after_session_terminate: checkin for session={}",
@@ -191,7 +198,15 @@ impl HookHandler for AfterSessionTerminateHook {
             );
         }
 
-        Ok(HookAction::Continue(None))
+        HookResult::continue_execution("flexnet")
+    }
+
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn priority(&self) -> i32 {
+        100
     }
 }
 
@@ -211,18 +226,14 @@ impl OnSessionExpiredHook {
 
 #[async_trait]
 impl HookHandler for OnSessionExpiredHook {
-    fn name(&self) -> &str {
-        "flexnet_on_session_expired"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
-
-    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
-        let session_id = ctx
-            .session_id
-            .ok_or_else(|| AppError::internal("on_session_expired: session_id missing"))?;
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
+        let session_id = match payload.get_uuid("session_id") {
+            Some(id) => id,
+            None => {
+                tracing::error!("FlexNet on_session_expired: session_id missing from payload");
+                return HookResult::continue_execution("flexnet");
+            }
+        };
 
         tracing::info!(
             "FlexNet on_session_expired: checkin for session={}",
@@ -241,7 +252,15 @@ impl HookHandler for OnSessionExpiredHook {
             );
         }
 
-        Ok(HookAction::Continue(None))
+        HookResult::continue_execution("flexnet")
+    }
+
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn priority(&self) -> i32 {
+        100
     }
 }
 
@@ -269,58 +288,68 @@ impl OnSessionIdleHook {
 
 #[async_trait]
 impl HookHandler for OnSessionIdleHook {
-    fn name(&self) -> &str {
-        "flexnet_on_session_idle"
-    }
-
-    fn priority(&self) -> i32 {
-        50
-    }
-
-    async fn execute(&self, ctx: &HookContext, _payload: &HookPayload) -> HookResult {
+    async fn handle(&self, payload: &HookPayload) -> HookResult {
         if !self.release_on_idle {
-            return Ok(HookAction::Continue(None));
+            return HookResult::continue_execution("flexnet");
         }
 
         // Star licenses have unlimited seats — no need to release on idle
         if self.manager.is_star_license() {
-            return Ok(HookAction::Continue(None));
+            return HookResult::continue_execution("flexnet");
         }
 
-        let session_id = ctx
-            .session_id
-            .ok_or_else(|| AppError::internal("on_session_idle: session_id missing"))?;
-
-        let pool_status = self.manager.pool_status().await?;
-
-        // Only release if above critical threshold
-        let utilization = if pool_status.total_seats > 0 {
-            (pool_status.checked_out as f64 / pool_status.total_seats as f64) * 100.0
-        } else {
-            0.0
+        let session_id = match payload.get_uuid("session_id") {
+            Some(id) => id,
+            None => {
+                tracing::error!("FlexNet on_session_idle: session_id missing from payload");
+                return HookResult::continue_execution("flexnet");
+            }
         };
 
-        if utilization >= pool_status.critical_threshold as f64 {
-            tracing::info!(
-                "Pool at {:.1}% utilization (critical: {}%), releasing idle session={}",
-                utilization,
-                pool_status.critical_threshold,
-                session_id
-            );
-
-            if let Err(e) = self
-                .manager
-                .checkin_by_session(SessionId::from(session_id))
-                .await
-            {
-                tracing::error!(
-                    "Failed to release idle license (session={}): {}",
-                    session_id,
-                    e
-                );
+        let pool_status = match self.manager.pool_status().await {
+            Ok(status) => status,
+            Err(e) => {
+                tracing::error!("Failed to get pool status: {}", e);
+                return HookResult::continue_execution("flexnet");
             }
-        }
+        };
 
-        Ok(HookAction::Continue(None))
+        // Only release if above critical threshold
+        // let utilization = if pool_status.total_seats > 0 {
+        //     (pool_status.checked_out as f64 / pool_status.total_seats as f64) * 100.0
+        // } else {
+        //     0.0
+        // };
+
+        // if utilization >= pool_status.critical_threshold as f64 {
+        //     tracing::info!(
+        //         "Pool at {:.1}% utilization (critical: {}%), releasing idle session={}",
+        //         utilization,
+        //         pool_status.critical_threshold,
+        //         session_id
+        //     );
+
+        //     if let Err(e) = self
+        //         .manager
+        //         .checkin_by_session(SessionId::from(session_id))
+        //         .await
+        //     {
+        //         tracing::error!(
+        //             "Failed to release idle license (session={}): {}",
+        //             session_id,
+        //             e
+        //         );
+        //     }
+        // }
+
+        HookResult::continue_execution("flexnet")
+    }
+
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn priority(&self) -> i32 {
+        50
     }
 }

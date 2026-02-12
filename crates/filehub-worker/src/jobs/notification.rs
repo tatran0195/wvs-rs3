@@ -48,7 +48,7 @@ impl NotificationJobHandler {
 
         let expired_count = self
             .notification_repo
-            .delete_expired(cutoff)
+            .cleanup_old(cutoff)
             .await
             .map_err(|e| {
                 JobExecutionError::Transient(format!("Notification cleanup failed: {}", e))

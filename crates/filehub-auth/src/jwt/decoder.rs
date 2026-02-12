@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use uuid::Uuid;
 
 use filehub_cache::provider::CacheManager;
 use filehub_core::config::AuthConfig;
 use filehub_core::error::AppError;
+use filehub_core::traits::CacheProvider;
 
 use super::claims::{Claims, TokenType};
 
@@ -108,7 +108,7 @@ impl JwtDecoder {
     /// Checks whether the given JWT ID has been blocklisted.
     async fn check_blocklist(&self, jti: &Uuid) -> Result<(), AppError> {
         let key = format!("{}{}", BLOCKLIST_PREFIX, jti);
-        let blocked: Option<String> = self.cache.get(&key).await.unwrap_or(None);
+        let blocked = self.cache.get(&key).await.ok().flatten();
         if blocked.is_some() {
             return Err(AppError::unauthorized("Token has been revoked"));
         }
@@ -129,7 +129,7 @@ impl JwtDecoder {
             std::time::Duration::from_secs(60)
         };
         self.cache
-            .set_with_ttl(&key, "revoked", ttl)
+            .set(&key, "revoked", ttl)
             .await
             .map_err(|e| AppError::internal(format!("Failed to blocklist token: {e}")))?;
         Ok(())
@@ -141,7 +141,7 @@ impl JwtDecoder {
         // Block for 24 hours (max refresh token lifetime)
         let ttl = std::time::Duration::from_secs(86400);
         self.cache
-            .set_with_ttl(&key, "blocked", ttl)
+            .set(&key, "blocked", ttl)
             .await
             .map_err(|e| AppError::internal(format!("Failed to blocklist session: {e}")))?;
         Ok(())

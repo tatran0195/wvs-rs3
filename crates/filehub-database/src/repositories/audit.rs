@@ -131,4 +131,59 @@ impl AuditLogRepository {
             .await
             .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to create audit entry", e))
     }
+
+    /// Count occurrences of an action since a specific time.
+    pub async fn count_actions_since(
+        &self,
+        action: &str,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<i64> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_log WHERE action = $1 AND created_at >= $2",
+        )
+        .bind(action)
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to count audit actions", e)
+        })?;
+        Ok(count)
+    }
+    /// Count audit entries since a specific time.
+    pub async fn count_since(&self, since: chrono::DateTime<chrono::Utc>) -> AppResult<i64> {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE created_at >= $1")
+                .bind(since)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(
+                        ErrorKind::Database,
+                        "Failed to count recent audit entries",
+                        e,
+                    )
+                })?;
+        Ok(count)
+    }
+
+    /// Find since a specific time.
+    pub async fn find_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> AppResult<Vec<AuditLogEntry>> {
+        let entries =
+            sqlx::query_as::<_, AuditLogEntry>("SELECT * FROM audit_log WHERE created_at >= $1")
+                .bind(since)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| {
+                    AppError::with_source(
+                        ErrorKind::Database,
+                        "Failed to find recent audit entries",
+                        e,
+                    )
+                })?;
+        Ok(entries)
+    }
 }

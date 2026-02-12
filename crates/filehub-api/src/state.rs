@@ -2,6 +2,10 @@
 
 use std::sync::Arc;
 
+use filehub_service::{
+    AccessService, AdminUserService, DownloadService, PreviewService, SearchService, SessionAudit,
+    TerminationService, TreeService, UserService, VersionService, WeeklyReportService,
+};
 use sqlx::PgPool;
 
 use filehub_auth::acl::resolver::EffectivePermissionResolver;
@@ -11,9 +15,10 @@ use filehub_auth::password::hasher::PasswordHasher;
 use filehub_auth::rbac::enforcer::RbacEnforcer;
 use filehub_auth::seat::allocator::SeatAllocatorDispatch;
 use filehub_auth::session::manager::SessionManager;
+
 use filehub_cache::provider::CacheManager;
 use filehub_core::config::AppConfig;
-use filehub_plugin::hooks::registry::HookRegistry;
+use filehub_plugin::manager::PluginManager;
 use filehub_realtime::server::RealtimeEngine;
 use filehub_storage::manager::StorageManager;
 
@@ -74,10 +79,10 @@ pub struct AppState {
     pub permission_resolver: Arc<EffectivePermissionResolver>,
 
     // ── Plugins & Realtime ───────────────────────────────────
-    /// Plugin hook registry
-    pub hook_registry: Arc<HookRegistry>,
+    /// Plugin manager (registry + dispatcher)
+    pub plugin_manager: Arc<PluginManager>,
     /// WebSocket realtime engine
-    pub realtime_engine: Arc<RealtimeEngine>,
+    pub realtime: Arc<RealtimeEngine>,
 
     // ── Repositories ─────────────────────────────────────────
     /// User repository
@@ -122,4 +127,26 @@ pub struct AppState {
     pub permission_service: Arc<PermissionService>,
     /// Session management service
     pub session_service: Arc<SessionService>,
+    /// Audit service
+    pub audit_service: Arc<SessionAudit>,
+    /// Admin user service
+    pub admin_user_service: Arc<AdminUserService>,
+    /// User service
+    pub user_service: Arc<UserService>,
+    /// Report service
+    pub report_service: Arc<WeeklyReportService>,
+    /// Download service
+    pub download_service: Arc<DownloadService>,
+    /// Preview service
+    pub preview_service: Arc<PreviewService>,
+    /// Version service
+    pub version_service: Arc<VersionService>,
+    /// Tree service
+    pub tree_service: Arc<TreeService>,
+    /// Termination service
+    pub termination_service: Arc<TerminationService>,
+    /// Search service
+    pub search_service: Arc<SearchService>,
+    /// Access service
+    pub access_service: Arc<AccessService>,
 }

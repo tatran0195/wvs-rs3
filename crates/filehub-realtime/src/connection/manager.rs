@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use serde_json;
 use tokio::sync::mpsc;
 use tracing;
 use uuid::Uuid;
@@ -9,7 +10,7 @@ use uuid::Uuid;
 use filehub_core::types::id::{SessionId, UserId};
 use filehub_entity::user::role::UserRole;
 
-use crate::message::types::OutboundMessage;
+use crate::message::types::{InboundMessage, OutboundMessage};
 
 use super::handle::{ConnectionHandle, ConnectionId, ConnectionInfo};
 use super::pool::ConnectionPool;
@@ -32,6 +33,42 @@ impl ConnectionManager {
             pool: ConnectionPool::new(),
             max_per_user,
             max_subscriptions,
+        }
+    }
+
+    /// Handle inbound message from connection
+    pub async fn handle_inbound(&self, connection_id: &Uuid, text: &str) {
+        let msg: InboundMessage = match serde_json::from_str(text) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(%connection_id, error = %e, "Failed to parse inbound message");
+                return;
+            }
+        };
+
+        match msg {
+            InboundMessage::Subscribe { channel } => {
+                if let Err(e) = self.subscribe(*connection_id, &channel).await {
+                    tracing::warn!(%connection_id, channel, error = %e, "Subscription failed");
+                }
+            }
+            InboundMessage::Unsubscribe { channel } => {
+                self.unsubscribe(*connection_id, &channel).await;
+            }
+            InboundMessage::Heartbeat => {
+                if let Some(handle) = self.pool.get(*connection_id) {
+                    handle.touch().await;
+                }
+            }
+            InboundMessage::Pong { .. } => {
+                if let Some(handle) = self.pool.get(*connection_id) {
+                    handle.record_pong().await;
+                }
+            }
+            _ => {
+                // Ignore other messages for now
+                tracing::debug!(%connection_id, ?msg, "Unhandled inbound message");
+            }
         }
     }
 

@@ -118,7 +118,7 @@ impl LicenseProxyApi {
             lib: &libloading::Library,
             name: &[u8],
         ) -> Result<libloading::Symbol<'static, T>, libloading::Error> {
-            let s = lib.get::<T>(name)?;
+            let s = unsafe { lib.get::<T>(name) }?;
             Ok(unsafe { mem::transmute(s) })
         }
 

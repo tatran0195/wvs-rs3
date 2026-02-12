@@ -5,13 +5,15 @@
 //! 2. Per-role configuration (from config)
 //! 3. Default (unlimited / pool-bounded)
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use filehub_core::config::session::OverflowStrategy;
 use uuid::Uuid;
 
 use filehub_core::config::SessionConfig;
 use filehub_core::error::AppError;
-use filehub_database::repositories::session::SessionLimitRepository;
+use filehub_database::repositories::session_limit::SessionLimitRepository;
 use filehub_entity::user::UserRole;
 
 /// Resolves session limits for individual users based on overrides, role config, and defaults.
@@ -66,10 +68,10 @@ impl SessionLimiter {
     /// Gets the configured limit for a specific role.
     fn get_role_limit(&self, role: &UserRole) -> u32 {
         match role {
-            UserRole::Admin => self.config.limits.by_role.admin,
-            UserRole::Manager => self.config.limits.by_role.manager,
-            UserRole::Creator => self.config.limits.by_role.creator,
-            UserRole::Viewer => self.config.limits.by_role.viewer,
+            UserRole::Admin => *self.config.limits.by_role.get("admin").unwrap_or(&0),
+            UserRole::Manager => *self.config.limits.by_role.get("manager").unwrap_or(&0),
+            UserRole::Creator => *self.config.limits.by_role.get("creator").unwrap_or(&0),
+            UserRole::Viewer => *self.config.limits.by_role.get("viewer").unwrap_or(&0),
         }
     }
 
@@ -79,7 +81,7 @@ impl SessionLimiter {
     }
 
     /// Returns the configured overflow strategy.
-    pub fn overflow_strategy(&self) -> &str {
+    pub fn overflow_strategy(&self) -> &OverflowStrategy {
         &self.config.limits.overflow_strategy
     }
 
@@ -106,7 +108,7 @@ impl SessionLimiter {
     }
 
     /// Gets the current per-role limit configuration.
-    pub fn role_limits(&self) -> &filehub_core::config::RoleLimits {
+    pub fn role_limits(&self) -> &HashMap<String, u32> {
         &self.config.limits.by_role
     }
 }

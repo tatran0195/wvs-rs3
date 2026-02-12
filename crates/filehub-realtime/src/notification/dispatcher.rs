@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use tracing;
 use uuid::Uuid;
 
-use filehub_core::config::NotificationsConfig;
+use filehub_core::config::NotificationRealtimeConfig;
 use filehub_core::types::id::UserId;
 use filehub_service::notification::service::NotificationService;
 
@@ -14,7 +15,6 @@ use crate::message::types::OutboundMessage;
 
 use super::dedup::EventDeduplicator;
 use super::persistence;
-use super::priority::NotificationPriority;
 
 /// Dispatches notifications to online users via WS and persists for offline users.
 #[derive(Debug)]
@@ -26,7 +26,7 @@ pub struct NotificationDispatcher {
     /// Event deduplicator
     dedup: EventDeduplicator,
     /// Configuration
-    config: NotificationsConfig,
+    config: NotificationRealtimeConfig,
 }
 
 impl NotificationDispatcher {
@@ -34,7 +34,7 @@ impl NotificationDispatcher {
     pub fn new(
         connections: Arc<ConnectionManager>,
         notification_service: Arc<NotificationService>,
-        config: NotificationsConfig,
+        config: NotificationRealtimeConfig,
     ) -> Self {
         Self {
             connections,
@@ -99,5 +99,27 @@ impl NotificationDispatcher {
     /// Cleanup dedup state
     pub fn cleanup_dedup(&self) {
         self.dedup.cleanup();
+    }
+
+    /// Broadcast admin message
+    pub async fn broadcast_admin_message(
+        &self,
+        id: Uuid,
+        title: &str,
+        message: &str,
+        severity: &str,
+        persistent: bool,
+    ) {
+        let msg = OutboundMessage::AdminBroadcast {
+            broadcast_id: id,
+            title: title.to_string(),
+            message: message.to_string(),
+            severity: severity.to_string(),
+            persistent,
+            action_payload: None,
+            action_type: None,
+            timestamp: Utc::now(),
+        };
+        self.broadcast(msg).await;
     }
 }

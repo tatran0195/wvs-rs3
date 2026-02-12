@@ -114,6 +114,12 @@ impl FolderRepository {
         .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to find ancestors", e))
     }
 
+    /// Get the ancestry chain as a list of folder IDs (from target folder up to root).
+    pub async fn get_ancestry(&self, folder_id: Uuid) -> AppResult<Vec<Uuid>> {
+        let folders = self.find_ancestors(folder_id).await?;
+        Ok(folders.into_iter().map(|f| f.id).collect())
+    }
+
     /// Create a new folder.
     pub async fn create(&self, data: &CreateFolder) -> AppResult<Folder> {
         sqlx::query_as::<_, Folder>(
@@ -136,6 +142,48 @@ impl FolderRepository {
             }
             _ => AppError::with_source(ErrorKind::Database, "Failed to create folder", e),
         })
+    }
+
+    /// Update a folder record.
+    pub async fn update(&self, folder: &Folder) -> AppResult<Folder> {
+        sqlx::query_as::<_, Folder>(
+            "UPDATE folders SET parent_id = $2, name = $3, path = $4, depth = $5, updated_at = $6 \
+             WHERE id = $1 RETURNING *",
+        )
+        .bind(folder.id)
+        .bind(folder.parent_id)
+        .bind(&folder.name)
+        .bind(&folder.path)
+        .bind(folder.depth)
+        .bind(folder.updated_at)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::with_source(ErrorKind::Database, "Failed to update folder", e))?
+        .ok_or_else(|| AppError::not_found(format!("Folder {} not found", folder.id)))
+    }
+
+    /// Update paths of all descendant folders.
+    pub async fn update_children_paths(
+        &self,
+        old_path_prefix: &str,
+        new_path_prefix: &str,
+    ) -> AppResult<()> {
+        let old_p = format!("{}/", old_path_prefix);
+        let new_p = format!("{}/", new_path_prefix);
+
+        sqlx::query(
+            "UPDATE folders SET path = $1 || substring(path from char_length($2) + 1) \
+             WHERE path LIKE $2 || '%'",
+        )
+        .bind(&new_p)
+        .bind(&old_p)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to update child paths", e)
+        })?;
+
+        Ok(())
     }
 
     /// Rename a folder.
@@ -211,5 +259,26 @@ impl FolderRepository {
                 AppError::with_source(ErrorKind::Database, "Failed to count children", e)
             })?;
         Ok(count as u64)
+    }
+
+    /// Batch count files for multiple folders.
+    pub async fn count_files_batch(
+        &self,
+        folder_ids: &[Uuid],
+    ) -> AppResult<std::collections::HashMap<Uuid, u64>> {
+        let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+            "SELECT folder_id, COUNT(*) FROM files WHERE folder_id = ANY($1) GROUP BY folder_id",
+        )
+        .bind(folder_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to batch count files", e)
+        })?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, count)| (id, count as u64))
+            .collect())
     }
 }

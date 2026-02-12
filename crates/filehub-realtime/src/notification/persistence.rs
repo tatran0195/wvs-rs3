@@ -1,7 +1,5 @@
 //! Notification persistence for offline users.
 
-use uuid::Uuid;
-
 use filehub_core::error::AppError;
 use filehub_core::types::id::UserId;
 
@@ -33,16 +31,16 @@ pub async fn persist_for_offline(
     {
         let notification = filehub_entity::notification::model::Notification {
             id: *id,
-            user_id: *user_id,
+            user_id: user_id.into_uuid(),
             category: category.clone(),
             event_type: event_type.clone(),
             title: title.clone(),
             message: message.clone(),
             payload: payload.clone(),
-            priority: priority.clone(),
-            is_read: false,
+            priority: Some(priority.clone()),
+            is_read: Some(false),
             read_at: None,
-            is_dismissed: false,
+            is_dismissed: Some(false),
             actor_id: *actor_id,
             resource_type: resource_type.clone(),
             resource_id: *resource_id,
@@ -50,7 +48,9 @@ pub async fn persist_for_offline(
             expires_at: None,
         };
 
-        notification_service.create(notification).await?;
+        notification_service
+            .create_notification(notification)
+            .await?;
     }
 
     Ok(())

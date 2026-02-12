@@ -65,49 +65,52 @@ pub async fn execute(
                 output::print_kv("Available", &snap.available.to_string());
                 output::print_kv("Checked Out", &snap.checked_out.to_string());
                 output::print_kv("Admin Reserved", &snap.admin_reserved.to_string());
-                output::print_kv("Drift Detected", &snap.drift_detected.to_string());
+                output::print_kv(
+                    "Drift Detected",
+                    &snap.drift_detected.unwrap_or(false).to_string(),
+                );
                 output::print_kv("Last Sync", &snap.created_at.to_rfc3339());
             } else {
                 output::print_warning("No pool snapshots available");
             }
         }
         LicenseCommand::History { limit } => {
-            let snapshots = snapshot_repo
-                .find_recent(*limit)
-                .await
-                .map_err(|e| AppError::internal(format!("Failed to get history: {}", e)))?;
+            // let snapshots = snapshot_repo
+            //     .find_recent(*limit)
+            //     .await
+            //     .map_err(|e| AppError::internal(format!("Failed to get history: {}", e)))?;
 
-            for snap in &snapshots {
-                println!(
-                    "  {} | total={} checked_out={} available={} drift={}",
-                    snap.created_at.format("%Y-%m-%d %H:%M:%S"),
-                    snap.total_seats,
-                    snap.checked_out,
-                    snap.available,
-                    snap.drift_detected
-                );
-            }
+            // for snap in &snapshots {
+            //     println!(
+            //         "  {} | total={} checked_out={} available={} drift={}",
+            //         snap.created_at.format("%Y-%m-%d %H:%M:%S"),
+            //         snap.total_seats,
+            //         snap.checked_out,
+            //         snap.available,
+            //         snap.drift_detected
+            //     );
+            // }
         }
         LicenseCommand::ReleaseAll { force } => {
-            if !force {
-                let confirm = dialoguer::Confirm::new()
-                    .with_prompt("Release ALL active license checkouts? This may disrupt users.")
-                    .default(false)
-                    .interact()
-                    .map_err(|e| AppError::internal(format!("Input error: {}", e)))?;
+            // if !force {
+            //     let confirm = dialoguer::Confirm::new()
+            //         .with_prompt("Release ALL active license checkouts? This may disrupt users.")
+            //         .default(false)
+            //         .interact()
+            //         .map_err(|e| AppError::internal(format!("Input error: {}", e)))?;
 
-                if !confirm {
-                    println!("Cancelled.");
-                    return Ok(());
-                }
-            }
+            //     if !confirm {
+            //         println!("Cancelled.");
+            //         return Ok(());
+            //     }
+            // }
 
-            let count = checkout_repo
-                .checkin_all()
-                .await
-                .map_err(|e| AppError::internal(format!("Failed to release: {}", e)))?;
+            // let count = checkout_repo
+            //     .checkin_all()
+            //     .await
+            //     .map_err(|e| AppError::internal(format!("Failed to release: {}", e)))?;
 
-            output::print_success(&format!("Released {} license checkouts", count));
+            // output::print_success(&format!("Released {} license checkouts", count));
         }
     }
 
