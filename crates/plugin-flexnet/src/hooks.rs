@@ -326,32 +326,29 @@ impl SimpleHookHandler for OnSessionIdleHook {
         };
 
         // Only release if above critical threshold
-        // let utilization = if pool_status.total_seats > 0 {
-        //     (pool_status.checked_out as f64 / pool_status.total_seats as f64) * 100.0
-        // } else {
-        //     0.0
-        // };
+        let utilization = pool_status.usage_percent;
+        let critical_threshold = self.manager.critical_threshold_percent();
 
-        // if utilization >= pool_status.critical_threshold as f64 {
-        //     tracing::info!(
-        //         "Pool at {:.1}% utilization (critical: {}%), releasing idle session={}",
-        //         utilization,
-        //         pool_status.critical_threshold,
-        //         session_id
-        //     );
+        if utilization >= critical_threshold as f64 {
+            tracing::info!(
+                "Pool at {:.1}% utilization (critical: {}%), releasing idle session={}",
+                utilization,
+                critical_threshold,
+                session_id
+            );
 
-        //     if let Err(e) = self
-        //         .manager
-        //         .checkin_by_session(SessionId::from(session_id))
-        //         .await
-        //     {
-        //         tracing::error!(
-        //             "Failed to release idle license (session={}): {}",
-        //             session_id,
-        //             e
-        //         );
-        //     }
-        // }
+            if let Err(e) = self
+                .manager
+                .checkin_by_session(SessionId::from(session_id))
+                .await
+            {
+                tracing::error!(
+                    "Failed to release idle license (session={}): {}",
+                    session_id,
+                    e
+                );
+            }
+        }
 
         HookResult::continue_execution("flexnet")
     }

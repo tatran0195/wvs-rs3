@@ -455,4 +455,9 @@ impl LicenseManager {
     pub async fn invalidate_cache(&self) {
         self.cached_status.write().await.take();
     }
+
+    /// Get the critical threshold percentage from config
+    pub fn critical_threshold_percent(&self) -> u8 {
+        self.config.pool.critical_threshold_percent
+    }
 }
