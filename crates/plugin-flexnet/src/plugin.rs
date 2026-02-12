@@ -3,14 +3,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use filehub_core::config::LicenseConfig;
-use filehub_plugin::HookPoint;
 use tracing;
 
+use filehub_core::config::LicenseConfig;
 use filehub_core::error::AppError;
 use filehub_database::repositories::license::LicenseCheckoutRepository;
 use filehub_database::repositories::pool_snapshot::PoolSnapshotRepository;
-use filehub_plugin::hooks::registry::HookRegistry;
+use filehub_plugin::HookRegistry;
+use filehub_plugin::prelude::*;
 
 use crate::ffi::wrapper::LicenseManagerWrapper;
 use crate::hooks::{
@@ -132,35 +132,42 @@ impl FlexNetPlugin {
         registry
             .register(
                 HookPoint::AfterLogin,
-                Arc::new(AfterLoginHook::new(Arc::clone(manager))),
+                SimpleHandlerAdapter::wrap(Arc::new(AfterLoginHook::new(Arc::clone(manager)))),
             )
             .await;
 
         registry
             .register(
                 HookPoint::BeforeLogout,
-                Arc::new(BeforeLogoutHook::new(Arc::clone(manager))),
+                SimpleHandlerAdapter::wrap(Arc::new(BeforeLogoutHook::new(Arc::clone(manager)))),
             )
             .await;
 
         registry
             .register(
                 HookPoint::AfterSessionTerminate,
-                Arc::new(AfterSessionTerminateHook::new(Arc::clone(manager))),
+                SimpleHandlerAdapter::wrap(Arc::new(AfterSessionTerminateHook::new(Arc::clone(
+                    manager,
+                )))),
             )
             .await;
 
         registry
             .register(
                 HookPoint::OnSessionExpired,
-                Arc::new(OnSessionExpiredHook::new(Arc::clone(manager))),
+                SimpleHandlerAdapter::wrap(Arc::new(OnSessionExpiredHook::new(Arc::clone(
+                    manager,
+                )))),
             )
             .await;
 
         registry
             .register(
                 HookPoint::OnSessionIdle,
-                Arc::new(OnSessionIdleHook::new(Arc::clone(manager), true)),
+                SimpleHandlerAdapter::wrap(Arc::new(OnSessionIdleHook::new(
+                    Arc::clone(manager),
+                    true,
+                ))),
             )
             .await;
 
@@ -201,19 +208,17 @@ impl FlexNetPlugin {
     }
 }
 
-#[async_trait::async_trait]
-impl filehub_plugin::registry::Plugin for FlexNetPlugin {
-    fn info(&self) -> filehub_plugin::registry::PluginInfo {
-        filehub_plugin::registry::PluginInfo {
-            id: "flexnet".to_string(),
-            name: PLUGIN_NAME.to_string(),
-            version: "v1.0.0".to_string(),
-            description: "FlexNet license management plugin".to_string(),
-            author: "TechnoStar".to_string(),
-            hooks: self.registered_hooks(),
-            enabled: true,
-            priority: 0,
-        }
+#[async_trait]
+impl Plugin for FlexNetPlugin {
+    fn info(&self) -> PluginInfo {
+        plugin_info!(
+            id: "flexnet",
+            name: PLUGIN_NAME,
+            version: "v1.0.0",
+            description: "FlexNet license management plugin",
+            author: "TechnoStar",
+            priority: 0
+        )
     }
 
     async fn on_load(&self) -> Result<(), String> {

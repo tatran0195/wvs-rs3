@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use filehub_plugin::hooks::definitions::HookPoint;
-use filehub_plugin::hooks::registry::HookHandler;
-use filehub_plugin::registry::Plugin;
+use crate::hooks::definitions::HookPoint;
+use crate::hooks::registry::HookHandler;
+use crate::registry::Plugin;
 
 /// A bundle describing a fully assembled plugin ready for registration.
 #[derive(Debug)]

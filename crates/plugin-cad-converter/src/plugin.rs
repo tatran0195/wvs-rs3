@@ -4,17 +4,16 @@
 //! Uses the flat `HookPayload` data bag to extract file upload information
 //! and signal conversion requirements via `HookResult` output data.
 
+use std::sync::Arc;
+use tracing::{debug, info, warn};
+
+use filehub_core::error::AppError;
+use filehub_plugin::{HookRegistry, prelude::*};
+
 use crate::config::ConversionConfig;
 use crate::metrics::MetricsSnapshot;
 use crate::models::FileType;
 use crate::processor::ConversionProcessor;
-
-use async_trait::async_trait;
-use filehub_core::error::AppError;
-use filehub_plugin::hooks::definitions::{HookPayload, HookPoint, HookResult};
-use filehub_plugin::hooks::registry::HookRegistry;
-use std::sync::Arc;
-use tracing::{debug, info, warn};
 
 /// Plugin name used for registration, logging, and hook results.
 const PLUGIN_NAME: &str = "cad-converter";
@@ -202,31 +201,25 @@ impl CadConverterPlugin {
         registry
             .register(
                 HookPoint::AfterUpload,
-                Arc::new(HookHandlerAdapter {
-                    inner: Box::new(AfterUploadHandler {
-                        processor: processor.clone(),
-                    }),
-                }),
+                SimpleHandlerAdapter::wrap(Arc::new(AfterUploadHandler {
+                    processor: processor.clone(),
+                })),
             )
             .await;
 
         registry
             .register(
                 HookPoint::OnServerStart,
-                Arc::new(HookHandlerAdapter {
-                    inner: Box::new(OnServerStartHandler {
-                        processor: processor.clone(),
-                    }),
-                }),
+                SimpleHandlerAdapter::wrap(Arc::new(OnServerStartHandler {
+                    processor: processor.clone(),
+                })),
             )
             .await;
 
         registry
             .register(
                 HookPoint::OnServerShutdown,
-                Arc::new(HookHandlerAdapter {
-                    inner: Box::new(OnServerShutdownHandler { processor }),
-                }),
+                SimpleHandlerAdapter::wrap(Arc::new(OnServerShutdownHandler { processor })),
             )
             .await;
 
@@ -268,19 +261,16 @@ impl CadConverterPlugin {
     }
 }
 
-#[async_trait::async_trait]
-impl filehub_plugin::registry::Plugin for CadConverterPlugin {
-    fn info(&self) -> filehub_plugin::registry::PluginInfo {
-        filehub_plugin::registry::PluginInfo {
-            id: PLUGIN_NAME.to_string(),
-            name: "CAD Converter".to_string(),
-            version: PLUGIN_VERSION.to_string(),
-            description: "TechnoStar Jupiter-based CAD/FEA converter plugin".to_string(),
-            author: "TechnoStar".to_string(),
-            hooks: self.registered_hooks(),
-            enabled: self.config.enabled,
-            priority: 100,
-        }
+#[async_trait]
+impl Plugin for CadConverterPlugin {
+    fn info(&self) -> PluginInfo {
+        plugin_info!(
+            id: PLUGIN_NAME,
+            name: "CAD Converter",
+            version: PLUGIN_VERSION,
+            description: "TechnoStar Jupiter-based CAD/FEA converter plugin",
+            author: "TechnoStar"
+        )
     }
 
     async fn on_load(&self) -> Result<(), String> {
@@ -317,23 +307,6 @@ impl filehub_plugin::registry::Plugin for CadConverterPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// Hook handler trait
-// ---------------------------------------------------------------------------
-
-/// Trait for hook handlers that the CAD converter plugin registers.
-///
-/// This mirrors the handler interface expected by `HookRegistry`. Each handler
-/// receives a `HookPayload` and returns a `HookResult`.
-#[async_trait]
-pub trait CadHookHandler: Send + Sync + std::fmt::Debug {
-    /// Handle a hook invocation.
-    async fn handle(&self, payload: &HookPayload) -> HookResult;
-
-    /// The name of this handler (for logging and debugging).
-    fn name(&self) -> &str;
-}
-
-// ---------------------------------------------------------------------------
 // AfterUpload hook handler
 // ---------------------------------------------------------------------------
 
@@ -352,7 +325,15 @@ struct AfterUploadHandler {
 }
 
 #[async_trait]
-impl CadHookHandler for AfterUploadHandler {
+impl SimpleHookHandler for AfterUploadHandler {
+    fn plugin_id(&self) -> &str {
+        PLUGIN_NAME
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::AfterUpload
+    }
+
     async fn handle(&self, payload: &HookPayload) -> HookResult {
         // Extract file name from the payload data bag
         let file_name = match payload.get_string(payload_keys::FILE_NAME) {
@@ -434,10 +415,6 @@ impl CadHookHandler for AfterUploadHandler {
 
         HookResult::continue_with_output(PLUGIN_NAME, serde_json::Value::Object(output))
     }
-
-    fn name(&self) -> &str {
-        "cad-converter:after_upload"
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +429,15 @@ struct OnServerStartHandler {
 }
 
 #[async_trait]
-impl CadHookHandler for OnServerStartHandler {
+impl SimpleHookHandler for OnServerStartHandler {
+    fn plugin_id(&self) -> &str {
+        PLUGIN_NAME
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::OnServerStart
+    }
+
     async fn handle(&self, _payload: &HookPayload) -> HookResult {
         info!(
             plugin = PLUGIN_NAME,
@@ -461,10 +446,6 @@ impl CadHookHandler for OnServerStartHandler {
             "CAD converter plugin ready"
         );
         HookResult::continue_execution(PLUGIN_NAME)
-    }
-
-    fn name(&self) -> &str {
-        "cad-converter:on_server_start"
     }
 }
 
@@ -480,7 +461,15 @@ struct OnServerShutdownHandler {
 }
 
 #[async_trait]
-impl CadHookHandler for OnServerShutdownHandler {
+impl SimpleHookHandler for OnServerShutdownHandler {
+    fn plugin_id(&self) -> &str {
+        PLUGIN_NAME
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::OnServerShutdown
+    }
+
     async fn handle(&self, _payload: &HookPayload) -> HookResult {
         let snap = self.processor.metrics_snapshot();
         info!(
@@ -495,42 +484,6 @@ impl CadHookHandler for OnServerShutdownHandler {
             "CAD converter final metrics"
         );
         HookResult::continue_execution(PLUGIN_NAME)
-    }
-
-    fn name(&self) -> &str {
-        "cad-converter:on_server_shutdown"
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Adapter: bridge CadHookHandler → filehub_plugin HookHandler
-// ---------------------------------------------------------------------------
-
-/// Adapter that wraps a `CadHookHandler` to implement the `filehub_plugin`
-/// hook handler trait.
-///
-/// The `filehub_plugin::hooks::registry::HookRegistry` expects handlers that
-/// implement a specific trait. This adapter bridges our typed handlers to
-/// that interface.
-#[derive(Debug)]
-struct HookHandlerAdapter {
-    /// The inner handler.
-    inner: Box<dyn CadHookHandler>,
-}
-
-#[async_trait]
-impl filehub_plugin::hooks::registry::HookHandler for HookHandlerAdapter {
-    async fn handle(&self, payload: &HookPayload) -> HookResult {
-        self.inner.handle(payload).await
-    }
-
-    fn plugin_id(&self) -> &str {
-        PLUGIN_NAME
-    }
-
-    fn priority(&self) -> i32 {
-        // Default priority for CAD converter plugin
-        100
     }
 }
 

@@ -1,13 +1,14 @@
 //! Filesystem utilities for the conversion pipeline.
 
-use crate::error::ConversionError;
-use crate::models::{ConversionInput, ConversionResult, FileType};
-
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
 use uuid::Uuid;
 use zip::ZipArchive;
+
+use crate::error::ConversionError;
+use crate::models::{ConversionInput, ConversionResult, FileType};
 
 /// Filesystem utility functions.
 pub struct FsUtils;

@@ -11,7 +11,6 @@ members = [
     "crates/filehub-realtime",
     "crates/filehub-worker",
     "crates/filehub-plugin",
-    "crates/filehub-plugin-sdk",
     "crates/filehub-api",
     "crates/plugin-flexnet",
     "crates/plugin-cad-converter",
@@ -128,7 +127,6 @@ filehub-service = { path = "crates/filehub-service" }
 filehub-realtime = { path = "crates/filehub-realtime" }
 filehub-worker = { path = "crates/filehub-worker" }
 filehub-plugin = { path = "crates/filehub-plugin" }
-filehub-plugin-sdk = { path = "crates/filehub-plugin-sdk" }
 filehub-api = { path = "crates/filehub-api" }
 plugin-flexnet = { path = "crates/plugin-flexnet" }
 plugin-cad-converter = { path = "crates/plugin-cad-converter" }

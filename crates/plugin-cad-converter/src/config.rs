@@ -3,12 +3,13 @@
 //! Supports auto-discovery of Jupiter-Web installations via the Windows
 //! registry Inno Setup GUID, falling back to common paths and PATH.
 
-use crate::jupiter::{DiscoveryMethod, JupiterDiscovery, JupiterInstallation};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tracing::{info, warn};
 use validator::Validate;
+
+use crate::jupiter::{DiscoveryMethod, JupiterDiscovery, JupiterInstallation};
 
 /// Configuration for the TechnoStar Jupiter-based CAD converter.
 ///

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use filehub_plugin::hooks::definitions::{HookPayload, HookPoint, HookResult};
-use filehub_plugin::hooks::registry::HookHandler;
+use crate::hooks::definitions::{HookPayload, HookPoint, HookResult};
+use crate::hooks::registry::HookHandler;
 
 /// Simplified hook handler trait that wraps the low-level `HookHandler`.
 ///

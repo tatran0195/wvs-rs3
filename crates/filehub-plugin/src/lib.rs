@@ -9,9 +9,13 @@
 //! - Optional dynamic loading via `libloading` (later)
 
 pub mod api;
+pub mod exports;
 pub mod hooks;
+pub mod macros;
 pub mod manager;
+pub mod prelude;
 pub mod registry;
+pub mod traits;
 
 pub use api::context::PluginContext;
 pub use hooks::definitions::{HookAction, HookPayload, HookPoint, HookResult};

@@ -1946,22 +1946,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "filehub-plugin-sdk"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "filehub-core",
- "filehub-plugin",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "filehub-realtime"
 version = "0.1.0"
 dependencies = [

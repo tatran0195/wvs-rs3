@@ -7,8 +7,9 @@
 //!
 //! On non-Windows platforms, only PATH and explicit configuration are supported.
 
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 

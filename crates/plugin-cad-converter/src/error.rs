@@ -4,9 +4,11 @@
 //! are consolidated into a single `ConversionError` enum that maps cleanly
 //! to `filehub_core::error::AppError`.
 
-use filehub_core::error::AppError;
 use std::path::PathBuf;
+
 use thiserror::Error;
+
+use filehub_core::error::AppError;
 
 /// Unified error type for all CAD conversion operations.
 #[derive(Debug, Error)]

@@ -15,8 +15,7 @@ use tracing;
 
 use filehub_core::error::AppError;
 use filehub_core::types::id::{SessionId, UserId};
-use filehub_plugin::hooks::definitions::{HookPayload, HookResult};
-use filehub_plugin::hooks::registry::HookHandler;
+use filehub_plugin::prelude::*;
 
 use crate::license::manager::LicenseManager;
 
@@ -40,7 +39,15 @@ impl AfterLoginHook {
 }
 
 #[async_trait]
-impl HookHandler for AfterLoginHook {
+impl SimpleHookHandler for AfterLoginHook {
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::AfterLogin
+    }
+
     async fn handle(&self, payload: &HookPayload) -> HookResult {
         let user_id = payload
             .get_uuid("user_id")
@@ -92,14 +99,6 @@ impl HookHandler for AfterLoginHook {
             }
         }
     }
-
-    fn plugin_id(&self) -> &str {
-        "flexnet"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
 }
 
 /// Hook: `before_logout` — checkin the license before session destruction.
@@ -119,7 +118,15 @@ impl BeforeLogoutHook {
 }
 
 #[async_trait]
-impl HookHandler for BeforeLogoutHook {
+impl SimpleHookHandler for BeforeLogoutHook {
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::BeforeLogout
+    }
+
     async fn handle(&self, payload: &HookPayload) -> HookResult {
         let session_id = match payload.get_uuid("session_id") {
             Some(id) => id,
@@ -146,14 +153,6 @@ impl HookHandler for BeforeLogoutHook {
 
         HookResult::continue_execution("flexnet")
     }
-
-    fn plugin_id(&self) -> &str {
-        "flexnet"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
 }
 
 /// Hook: `after_session_terminate` — checkin license after admin kills a session.
@@ -171,7 +170,15 @@ impl AfterSessionTerminateHook {
 }
 
 #[async_trait]
-impl HookHandler for AfterSessionTerminateHook {
+impl SimpleHookHandler for AfterSessionTerminateHook {
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::AfterSessionTerminate
+    }
+
     async fn handle(&self, payload: &HookPayload) -> HookResult {
         let session_id = match payload.get_uuid("session_id") {
             Some(id) => id,
@@ -200,14 +207,6 @@ impl HookHandler for AfterSessionTerminateHook {
 
         HookResult::continue_execution("flexnet")
     }
-
-    fn plugin_id(&self) -> &str {
-        "flexnet"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
 }
 
 /// Hook: `on_session_expired` — checkin license when session naturally expires.
@@ -225,7 +224,15 @@ impl OnSessionExpiredHook {
 }
 
 #[async_trait]
-impl HookHandler for OnSessionExpiredHook {
+impl SimpleHookHandler for OnSessionExpiredHook {
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::OnSessionExpired
+    }
+
     async fn handle(&self, payload: &HookPayload) -> HookResult {
         let session_id = match payload.get_uuid("session_id") {
             Some(id) => id,
@@ -254,14 +261,6 @@ impl HookHandler for OnSessionExpiredHook {
 
         HookResult::continue_execution("flexnet")
     }
-
-    fn plugin_id(&self) -> &str {
-        "flexnet"
-    }
-
-    fn priority(&self) -> i32 {
-        100
-    }
 }
 
 /// Hook: `on_session_idle` — consider releasing license under pool pressure.
@@ -287,7 +286,19 @@ impl OnSessionIdleHook {
 }
 
 #[async_trait]
-impl HookHandler for OnSessionIdleHook {
+impl SimpleHookHandler for OnSessionIdleHook {
+    fn plugin_id(&self) -> &str {
+        "flexnet"
+    }
+
+    fn hook_point(&self) -> HookPoint {
+        HookPoint::OnSessionIdle
+    }
+
+    fn priority(&self) -> i32 {
+        50
+    }
+
     async fn handle(&self, payload: &HookPayload) -> HookResult {
         if !self.release_on_idle {
             return HookResult::continue_execution("flexnet");
@@ -343,13 +354,5 @@ impl HookHandler for OnSessionIdleHook {
         // }
 
         HookResult::continue_execution("flexnet")
-    }
-
-    fn plugin_id(&self) -> &str {
-        "flexnet"
-    }
-
-    fn priority(&self) -> i32 {
-        50
     }
 }

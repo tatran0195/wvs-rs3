@@ -1,11 +1,12 @@
 //! Input resolution: expands ZIPs, scans directories, produces ConversionInput list.
 
+use std::path::PathBuf;
+
+use tracing::warn;
+
 use crate::error::ConversionError;
 use crate::filesystem::FsUtils;
 use crate::models::{ConversionInput, FileType};
-
-use std::path::PathBuf;
-use tracing::warn;
 
 /// Resolves raw input paths into typed ConversionInput items.
 pub struct InputResolver {
