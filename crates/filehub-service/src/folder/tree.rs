@@ -26,7 +26,7 @@ impl TreeService {
     /// Builds the complete folder tree starting from a root folder.
     pub async fn get_tree(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         folder_id: Uuid,
     ) -> Result<FolderNode, AppError> {
         let root = self

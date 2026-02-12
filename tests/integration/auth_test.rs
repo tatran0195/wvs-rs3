@@ -1,8 +1,8 @@
 //! Integration tests for authentication flow.
 
-mod helpers;
+use super::helpers;
 
-use http::StatusCode;
+use axum::http::StatusCode;
 
 #[tokio::test]
 async fn test_login_success() {

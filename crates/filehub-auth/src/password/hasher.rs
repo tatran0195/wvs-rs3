@@ -54,3 +54,14 @@ impl Default for PasswordHasher {
         Self::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_admin_hash() {
+        let hasher = PasswordHasher::new();
+        let hash = hasher.hash_password("password123").unwrap();
+        println!("ADMIN_HASH: {}", hash);
+    }
+}

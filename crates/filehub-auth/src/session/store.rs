@@ -45,7 +45,7 @@ impl SessionStore {
             user_id,
             token_hash: token_hash.to_string(),
             refresh_token_hash: Some(refresh_token_hash.to_string()),
-            ip_address: ip_address.to_string(),
+            ip_address,
             user_agent: user_agent.map(String::from),
             device_info,
             expires_at,

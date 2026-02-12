@@ -172,7 +172,6 @@ pub async fn run_server(config: AppConfig, db_pool: PgPool) -> Result<(), AppErr
         Arc::clone(&file_repo),
         Arc::clone(&folder_repo),
         Arc::clone(&permission_resolver),
-        Arc::clone(&rbac_enforcer),
     ));
     let upload_service = Arc::new(filehub_service::file::upload::UploadService::new(
         Arc::clone(&file_repo),

@@ -1,0 +1,39 @@
+{
+  "id": "e4b6d8a7-6b3a-4b1a-9c1a-1a2b3c4d5e6f",
+  "name": "FileHub Local",
+  "values": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080/api",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "admin_username",
+      "value": "admin",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "admin_password",
+      "value": "password123",
+      "type": "secret",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_at": "2026-02-12T13:50:00.000Z",
+  "_postman_exported_using": "Postman/10.0.0"
+}

@@ -18,7 +18,7 @@ allowed_headers = ["*"]
 max_age_seconds = 3600
 
 [database]
-url = "postgres://filehub:password@localhost:5432/filehub"
+url = "postgres://postgres:postgres@localhost:5432/wvsrs3"
 max_connections = 20
 min_connections = 5
 connect_timeout_seconds = 10

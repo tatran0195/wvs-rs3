@@ -7,7 +7,6 @@ use tracing::info;
 use uuid::Uuid;
 
 use filehub_auth::acl::EffectivePermissionResolver;
-use filehub_auth::rbac::RbacEnforcer;
 use filehub_core::error::AppError;
 use filehub_core::types::pagination::{PageRequest, PageResponse};
 use filehub_database::repositories::file::FileRepository;
@@ -26,8 +25,6 @@ pub struct FileService {
     folder_repo: Arc<FolderRepository>,
     /// Permission resolver.
     perm_resolver: Arc<EffectivePermissionResolver>,
-    /// RBAC enforcer.
-    rbac: Arc<RbacEnforcer>,
 }
 
 /// Data for updating a file's metadata.
@@ -61,13 +58,11 @@ impl FileService {
         file_repo: Arc<FileRepository>,
         folder_repo: Arc<FolderRepository>,
         perm_resolver: Arc<EffectivePermissionResolver>,
-        rbac: Arc<RbacEnforcer>,
     ) -> Self {
         Self {
             file_repo,
             folder_repo,
             perm_resolver,
-            rbac,
         }
     }
 

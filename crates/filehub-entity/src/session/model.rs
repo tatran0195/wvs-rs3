@@ -22,7 +22,7 @@ pub struct Session {
     /// SHA-256 hash of the refresh token (if issued).
     pub refresh_token_hash: Option<String>,
     /// IP address from which the session was created.
-    pub ip_address: String,
+    pub ip_address: std::net::IpAddr,
     /// User-Agent header value.
     pub user_agent: Option<String>,
     /// Parsed device information (JSON).
@@ -98,7 +98,7 @@ pub struct CreateSession {
     /// SHA-256 hash of the refresh token.
     pub refresh_token_hash: Option<String>,
     /// IP address of the client.
-    pub ip_address: String,
+    pub ip_address: std::net::IpAddr,
     /// User-Agent header.
     pub user_agent: Option<String>,
     /// Parsed device info.

@@ -12,7 +12,7 @@ key_path = "/etc/ssl/private/filehub.key"
 allowed_origins = ["https://filehub.example.com"]
 
 [database]
-url = "postgres://filehub:CHANGE_ME@db:5432/filehub"
+url = "postgres://postgres:postgres@localhost:5432/wvsrs3"
 max_connections = 50
 min_connections = 10
 

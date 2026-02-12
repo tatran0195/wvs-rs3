@@ -45,16 +45,11 @@ fn init_logging(config: &AppConfig) {
             fmt()
                 .json()
                 .with_env_filter(filter)
-                .with_target(true)
                 .with_thread_ids(true)
                 .init();
         }
         _ => {
-            fmt()
-                .pretty()
-                .with_env_filter(filter)
-                .with_target(true)
-                .init();
+            fmt().pretty().with_env_filter(filter).init();
         }
     }
 }

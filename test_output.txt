@@ -1,0 +1,30 @@
+warning: unused import: `std::time::Duration`
+   --> crates\filehub-database\src\repositories\session.rs:478:9
+    |
+478 |     use std::time::Duration;
+    |         ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `filehub-database` (lib test) generated 1 warning (run `cargo fix --lib -p filehub-database --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.06s
+     Running unittests src\lib.rs (target\debug\deps\filehub_database-21e5311cc3bc2089.exe)
+
+running 1 test
+test repositories::session::tests::test_create_session_reproduction ... FAILED
+
+failures:
+
+---- repositories::session::tests::test_create_session_reproduction stdout ----
+
+thread 'repositories::session::tests::test_create_session_reproduction' (94436) panicked at crates\filehub-database\src\repositories\session.rs:525:23:
+Failed to create session: AppError { kind: Database, message: "Failed to create session", source: Some(ColumnDecode { index: "\"ip_address\"", source: "mismatched types; Rust type `alloc::string::String` (as SQL type `TEXT`) is not compatible with SQL type `INET`" }) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    repositories::session::tests::test_create_session_reproduction
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.52s
+
+error: test failed, to rerun pass `-p filehub-database --lib`

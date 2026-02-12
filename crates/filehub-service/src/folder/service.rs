@@ -102,7 +102,7 @@ impl FolderService {
     /// Lists children of a folder.
     pub async fn list_children(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         folder_id: Uuid,
         page: PageRequest,
     ) -> Result<PageResponse<Folder>, AppError> {

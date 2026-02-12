@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use http::{Request, StatusCode};
+use axum::http::{Request, StatusCode};
 use serde_json::Value;
 use sqlx::PgPool;
 use tower::ServiceExt;

@@ -1,0 +1,1 @@
+newman run tests/postman/filehub_collection.json -e tests/postman/filehub_environment.json --suppress-exit-code

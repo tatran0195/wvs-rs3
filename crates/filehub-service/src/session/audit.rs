@@ -55,7 +55,7 @@ impl SessionAudit {
     /// Searches the audit log.
     pub async fn search(
         &self,
-        ctx: &RequestContext,
+        _ctx: &RequestContext,
         actor_id: Option<Uuid>,
         action: Option<&str>,
         target_type: Option<&str>,

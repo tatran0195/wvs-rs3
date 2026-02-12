@@ -169,7 +169,7 @@ impl SessionRepository {
     pub async fn create(&self, data: &CreateSession) -> AppResult<Session> {
         sqlx::query_as::<_, Session>(
             "INSERT INTO sessions (user_id, token_hash, refresh_token_hash, ip_address, user_agent, device_info, expires_at) \
-             VALUES ($1, $2, $3, $4::INET, $5, $6, $7) RETURNING *"
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *"
         )
             .bind(data.user_id)
             .bind(&data.token_hash)
