@@ -2,10 +2,11 @@
 
 use clap::{Args, Subcommand};
 
-use crate::output::{self, OutputFormat};
-use filehub_core::error::AppError;
+use filehub_core::{error::AppError, types::PageRequest};
 use filehub_database::repositories::license::LicenseCheckoutRepository;
 use filehub_database::repositories::pool_snapshot::PoolSnapshotRepository;
+
+use crate::output::{self, OutputFormat};
 
 /// Arguments for license commands
 #[derive(Debug, Args)]
@@ -75,42 +76,38 @@ pub async fn execute(
             }
         }
         LicenseCommand::History { limit } => {
-            // let snapshots = snapshot_repo
-            //     .find_recent(*limit)
-            //     .await
-            //     .map_err(|e| AppError::internal(format!("Failed to get history: {}", e)))?;
+            let snapshots = snapshot_repo
+                .find_recent(&PageRequest {
+                    page: 1,
+                    page_size: *limit as u64,
+                })
+                .await
+                .map_err(|e| AppError::internal(format!("Failed to get history: {}", e)))?;
 
-            // for snap in &snapshots {
-            //     println!(
-            //         "  {} | total={} checked_out={} available={} drift={}",
-            //         snap.created_at.format("%Y-%m-%d %H:%M:%S"),
-            //         snap.total_seats,
-            //         snap.checked_out,
-            //         snap.available,
-            //         snap.drift_detected
-            //     );
-            // }
+            for snap in &snapshots.items {
+                output::print_item(&snap, format);
+            }
         }
         LicenseCommand::ReleaseAll { force } => {
-            // if !force {
-            //     let confirm = dialoguer::Confirm::new()
-            //         .with_prompt("Release ALL active license checkouts? This may disrupt users.")
-            //         .default(false)
-            //         .interact()
-            //         .map_err(|e| AppError::internal(format!("Input error: {}", e)))?;
+            if !force {
+                let confirm = dialoguer::Confirm::new()
+                    .with_prompt("Release ALL active license checkouts? This may disrupt users.")
+                    .default(false)
+                    .interact()
+                    .map_err(|e| AppError::internal(format!("Input error: {}", e)))?;
 
-            //     if !confirm {
-            //         println!("Cancelled.");
-            //         return Ok(());
-            //     }
-            // }
+                if !confirm {
+                    println!("Cancelled.");
+                    return Ok(());
+                }
+            }
 
-            // let count = checkout_repo
-            //     .checkin_all()
-            //     .await
-            //     .map_err(|e| AppError::internal(format!("Failed to release: {}", e)))?;
+            let count = checkout_repo
+                .checkin_all()
+                .await
+                .map_err(|e| AppError::internal(format!("Failed to release: {}", e)))?;
 
-            // output::print_success(&format!("Released {} license checkouts", count));
+            output::print_success(&format!("Released {} license checkouts", count));
         }
     }
 

@@ -50,7 +50,7 @@ pub enum AdminCommand {
 pub async fn execute(
     args: &AdminArgs,
     config_path: &str,
-    format: OutputFormat,
+    _format: OutputFormat,
 ) -> Result<(), AppError> {
     let config = super::load_config(config_path).await?;
     let pool: PgPool = super::create_db_pool(&config).await?;

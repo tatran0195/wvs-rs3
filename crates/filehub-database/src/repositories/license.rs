@@ -121,4 +121,18 @@ impl LicenseCheckoutRepository {
         })?;
         Ok(result.rows_affected())
     }
+
+    /// Check in ALL active licenses.
+    pub async fn checkin_all(&self) -> AppResult<u64> {
+        let result = sqlx::query(
+            "UPDATE license_checkouts SET is_active = FALSE, checked_in_at = NOW() \
+             WHERE is_active = TRUE",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            AppError::with_source(ErrorKind::Database, "Failed to checkin all licenses", e)
+        })?;
+        Ok(result.rows_affected())
+    }
 }
